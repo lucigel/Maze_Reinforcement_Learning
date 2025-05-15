@@ -1,8 +1,7 @@
 # maze_env.py
-
 import numpy as np
 from typing import Tuple, List, Dict, Optional, Any
-from backend.maze_generators.base_generator import BaseMazeGenerator
+from maze_generators.base_generator import BaseMazeGenerator
 
 
 class MazeEnvironment:
@@ -109,19 +108,23 @@ class MazeEnvironment:
         self.done = False
         return self.current_pos
     
+
     def step(self, action: int) -> Tuple[Tuple[int, int], float, bool, Dict[str, Any]]:
         """
-        Thực hiện một bước trong môi trường.
+        Thực hiện một bước trong môi trường với phần thưởng thông minh hơn.
         
         Args:
-            action (int): Hành động (0: lên, 1: phải, 2: xuống, 3: trái)
-            
+            action (int): Hành động (0: lên, 1: xuống, 2: trái, 3: phải)
+
         Returns:
             Tuple[Tuple[int, int], float, bool, Dict[str, Any]]: Tuple gồm (trạng thái mới,
-                                                              phần thưởng, done, thông tin)
+                                                            phần thưởng, done, thông tin)
         """
         # Tăng số bước
         self.steps_count += 1
+        
+        # Tính khoảng cách Manhattan hiện tại đến đích
+        current_distance = abs(self.current_pos[0] - self.goal_pos[0]) + abs(self.current_pos[1] - self.goal_pos[1])
         
         # Tính toán vị trí mới
         dx, dy = self.ACTIONS[action]
@@ -134,9 +137,13 @@ class MazeEnvironment:
             # Không di chuyển và bị phạt nếu cố gắng đi vào tường
             reward = self.wall_penalty
             info = {"status": "hit_wall", "action": self.ACTION_NAMES[action]}
+            new_distance = current_distance  # Không đổi khoảng cách vì không di chuyển
         else:
             # Di chuyển đến vị trí mới
             self.current_pos = new_pos
+            
+            # Tính khoảng cách mới đến đích
+            new_distance = abs(self.current_pos[0] - self.goal_pos[0]) + abs(self.current_pos[1] - self.goal_pos[1])
             
             # Kiểm tra nếu đến đích
             if self.current_pos == self.goal_pos:
@@ -144,9 +151,21 @@ class MazeEnvironment:
                 self.done = True
                 info = {"status": "reached_goal", "action": self.ACTION_NAMES[action]}
             else:
-                # Phần thưởng cho mỗi bước di chuyển + phạt theo thời gian
-                reward = self.move_reward + (self.steps_count * self.time_penalty)
-                info = {"status": "moving", "action": self.ACTION_NAMES[action]}
+                # Phần thưởng cho mỗi bước di chuyển + phạt theo thời gian + phần thưởng khoảng cách
+                distance_reward = (current_distance - new_distance) * 2.0  # Thưởng gấp đôi cho việc tiến gần đích
+                
+                # Phần thưởng cho việc khám phá các ô mới
+                # (Giả sử chúng ta có thể theo dõi các ô đã ghé thăm)
+                exploration_reward = 0.5 if hasattr(self, 'visited_cells') and self.current_pos not in self.visited_cells else 0
+                
+                # Cập nhật ô đã ghé thăm nếu có
+                if hasattr(self, 'visited_cells'):
+                    self.visited_cells.add(self.current_pos)
+                else:
+                    self.visited_cells = {self.current_pos}
+                    
+                reward = self.move_reward + distance_reward + exploration_reward + (self.steps_count * self.time_penalty)
+                info = {"status": "moving", "action": self.ACTION_NAMES[action], "distance_change": current_distance - new_distance}
         
         # Kiểm tra nếu đã vượt quá số bước tối đa
         if self.steps_count >= self.max_steps and not self.done:

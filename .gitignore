@@ -1,0 +1,14 @@
+# Python cache
+**/__pycache__/
+**/*.pyc
+
+# Backend temp env
+backend/maze_env/
+backend/models/sarsa/*.pkl
+backend/models/sarsa/*.npz
+backend/models/q_learning/*.pkl
+backend/models/q_learning/*.npz
+
+
+# Frontend dependencies
+frontend/node_modules/

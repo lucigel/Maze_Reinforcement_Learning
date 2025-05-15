@@ -5,8 +5,7 @@ import numpy as np
 import os 
 import pickle
 from typing import Tuple, Dict, List, Any, Optional
-
-
+import random  # Thêm import
 
 class BaseAgent(ABC):
     """
@@ -17,9 +16,10 @@ class BaseAgent(ABC):
     """
     
     def __init__(self, state_size: Tuple[int, int], action_size: int, 
-                 learning_rate: float = 0.1, discount_factor: float = 0.9, 
-                 exploration_rate: float = 1.0, exploration_decay = 0.995,
-                 min_exploration_rate: float = 0.01, seed: Optional[int] = None):
+                 learning_rate: float = 0.2, discount_factor: float = 0.99, 
+                 exploration_rate: float = 1.0, exploration_decay = 0.998,
+                 min_exploration_rate: float = 0.05, seed: Optional[int] = None,
+                 buffer_size: int = 10000):
         """
         Khởi tạo agent học tăng cường cơ bản.
         
@@ -32,6 +32,7 @@ class BaseAgent(ABC):
             exploration_decay (float): Tốc độ giảm tỷ lệ khám phá
             min_exploration_rate (float): Giá trị nhỏ nhất của tỷ lệ khám phá
             seed (int, optional): Hạt giống cho bộ sinh số ngẫu nhiên
+            buffer_size (int): Kích thước buffer cho experience replay
             
             Q(s, a) = Q(s, a) + α * [r + γ * max Q(s', a') - Q(s, a)]
         """
@@ -52,6 +53,12 @@ class BaseAgent(ABC):
         self.episode_rewards = []
         self.steps_per_episode = []
         
+        # Thêm các biến cho experience replay
+        self.experience_buffer = []
+        self.buffer_size = buffer_size
+        
+        # Thêm biến theo dõi cho state visitation
+        self.state_visits = np.zeros((height, width))
     
     @abstractmethod
     def choose_action(self, state: Tuple[int, int]) -> int: 
@@ -87,10 +94,39 @@ class BaseAgent(ABC):
     
     def decay_exploration(self) -> None: 
         """
-        Giảm tỷ lệ khám phá (epsilon) theo thời gian.
+        Giảm tỷ lệ khám phá (epsilon) theo thời gian với cơ chế thích ứng.
         """
-        self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
+        # Giảm epsilon chậm hơn ở giai đoạn đầu, nhanh hơn về sau
+        if self.epsilon > 0.5:
+            self.epsilon = max(self.min_epsilon, self.epsilon * 0.999)  # Giảm chậm hơn
+        else:
+            self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
+    
+    def add_experience(self, experience: Tuple) -> None:
+        """
+        Thêm một trải nghiệm vào buffer.
         
+        Args:
+            experience (Tuple): Tuple (state, action, reward, next_state, done)
+        """
+        self.experience_buffer.append(experience)
+        if len(self.experience_buffer) > self.buffer_size:
+            self.experience_buffer.pop(0)
+    
+    def replay_experiences(self, batch_size: int = 32) -> None:
+        """
+        Học lại từ các trải nghiệm đã lưu trữ.
+        
+        Args:
+            batch_size (int): Số lượng trải nghiệm học lại mỗi lần
+        """
+        if len(self.experience_buffer) < batch_size:
+            return
+            
+        experiences = random.sample(self.experience_buffer, batch_size)
+        for state, action, reward, next_state, done in experiences:
+            self.learn(state, action, reward, next_state, done)
+            
     def save_model(self, file_path: str) -> None:
         """
         Lưu mô hình (Q-table) vào file.
@@ -109,7 +145,8 @@ class BaseAgent(ABC):
             'lr': self.lr, 
             'gamma': self.gamma, 
             'episode_rewards': self.episode_rewards, 
-            'steps_per_episode': self.steps_per_episode
+            'steps_per_episode': self.steps_per_episode,
+            'state_visits': self.state_visits
         }
         
         with open(file_path, 'wb') as f: 
@@ -134,63 +171,9 @@ class BaseAgent(ABC):
         self.episode_rewards = model_data['episode_rewards']
         self.steps_per_episode = model_data['steps_per_episode']
         
-    def export_to_json(self, file_path: str) -> None: 
-        """
-        Xuất mô hình sang định dạng JSON để sử dụng trên web.
-        
-        Args:
-            file_path (str): Đường dẫn đến file JSON
-        """
-        import json
-        
-        # Chuyển đổi Q-table thành định dạng dễ hiểu trong JavaScript
-        q_table_list = []
-        height, width, actions = self.q_table.shape
-        
-        for r in range(height):
-            for c in range(width):
-                q_values = self.q_table[r, c, :].tolist()
-                q_table_list.append({
-                    'row': r,
-                    'col': c,
-                    'q_values': q_values,
-                    'best_action': int(np.argmax(q_values))
-                })
-        
-        # Tạo đối tượng JSON
-        model_json = {
-            'state_size': list(self.state_size),
-            'action_size': self.action_size,
-            'q_table': q_table_list
-        }
-        
-        # Tạo thư mục nếu chưa tồn tại
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
-        # Lưu vào file JSON
-        with open(file_path, 'w') as f:
-            json.dump(model_json, f, indent=2)
-            
-    def plot_training_progress(self) -> None:
-        """
-        Vẽ biểu đồ tiến trình huấn luyện.
-        """
-        import matplotlib.pyplot as plt
-        
-        # Vẽ biểu đồ phần thưởng theo episode
-        plt.figure(figsize=(12, 5))
-        
-        plt.subplot(1, 2, 1)
-        plt.plot(self.episode_rewards)
-        plt.title('Phần thưởng theo episode')
-        plt.xlabel('Episode')
-        plt.ylabel('Tổng phần thưởng')
-        
-        plt.subplot(1, 2, 2)
-        plt.plot(self.steps_per_episode)
-        plt.title('Số bước theo episode')
-        plt.xlabel('Episode')
-        plt.ylabel('Số bước')
-        
-        plt.tight_layout()
-        plt.show()
+        # Tải state_visits nếu có
+        if 'state_visits' in model_data:
+            self.state_visits = model_data['state_visits']
+        else:
+            # Nếu đang tải mô hình cũ
+            self.state_visits = np.zeros(self.state_size)

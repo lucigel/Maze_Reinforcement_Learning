@@ -1,5 +1,4 @@
 # /base_generator.py
-
 from abc import ABC, abstractmethod
 import numpy as np 
 from typing import Tuple, Optional, List

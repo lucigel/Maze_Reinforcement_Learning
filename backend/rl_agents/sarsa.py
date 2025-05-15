@@ -1,23 +1,33 @@
 # sarsa.py
-
 import numpy as np
-from typing import Tuple, Optional
-from backend.rl_agents.base_agent import BaseAgent
+from typing import Tuple, List, Dict, Any, Optional
+from rl_agents.base_agent import BaseAgent
 
 class SARSAAgent(BaseAgent):
     """
-    Agent học tăng cường sử dụng thuật toán SARSA (State-Action-Reward-State-Action).
+    Triển khai thuật toán SARSA cho bài toán mê cung với các cải tiến.
     
-    SARSA là thuật toán học tăng cường kiểu on-policy, sử dụng chính sách 
-    hiện tại để cập nhật Q-table.
+    SARSA (State-Action-Reward-State-Action) là thuật toán học tăng cường on-policy,
+    học từ những trải nghiệm trực tiếp liên quan đến chính sách hiện tại của agent.
+    Thuật toán này sử dụng công thức cập nhật:
+    
+    Q(s, a) = Q(s, a) + α * [r + γ * Q(s', a') - Q(s, a)]
+    
+    Trong đó:
+    - s, a: Trạng thái và hành động hiện tại
+    - s', a': Trạng thái và hành động tiếp theo
+    - r: Phần thưởng nhận được
+    - α: Tốc độ học (learning rate)
+    - γ: Hệ số giảm (discount factor)
     """
     
-    def __init__(self, state_size: Tuple[int, int], action_size: int, 
-                 learning_rate: float = 0.1, discount_factor: float = 0.9, 
-                 exploration_rate: float = 1.0, exploration_decay: float = 0.995,
-                 min_exploration_rate: float = 0.01, seed: Optional[int] = None):
+    def __init__(self, state_size: Tuple[int, int], action_size: int = 4, 
+                 learning_rate: float = 0.2, discount_factor: float = 0.99, 
+                 exploration_rate: float = 1.0, exploration_decay: float = 0.998,
+                 min_exploration_rate: float = 0.05, seed: Optional[int] = None,
+                 use_expected_sarsa: bool = True):
         """
-        Khởi tạo SARSA agent.
+        Khởi tạo agent SARSA.
         
         Args:
             state_size (Tuple[int, int]): Kích thước không gian trạng thái (height, width)
@@ -28,16 +38,21 @@ class SARSAAgent(BaseAgent):
             exploration_decay (float): Tốc độ giảm tỷ lệ khám phá
             min_exploration_rate (float): Giá trị nhỏ nhất của tỷ lệ khám phá
             seed (int, optional): Hạt giống cho bộ sinh số ngẫu nhiên
+            use_expected_sarsa (bool): Sử dụng Expected SARSA thay vì SARSA thông thường
         """
-        super().__init__(state_size, action_size, learning_rate, discount_factor, 
-                         exploration_rate, exploration_decay, min_exploration_rate, seed)
+        super().__init__(state_size, action_size, learning_rate, discount_factor,
+                       exploration_rate, exploration_decay, min_exploration_rate, seed)
         
-        # Lưu hành động hiện tại để sử dụng trong quá trình học
-        self.current_action = None
+        # Các bảng thống kê bổ sung
+        self.state_visits = np.zeros(state_size)  # Theo dõi số lần thăm mỗi trạng thái
+        self.action_counts = np.zeros((state_size[0], state_size[1], action_size))  # Số lần thực hiện mỗi hành động
+        
+        # Tham số cho Expected SARSA
+        self.use_expected_sarsa = use_expected_sarsa
     
     def choose_action(self, state: Tuple[int, int]) -> int:
         """
-        Chọn hành động dựa trên trạng thái hiện tại, sử dụng chính sách epsilon-greedy.
+        Chọn hành động với chiến lược epsilon-greedy được cải tiến.
         
         Args:
             state (Tuple[int, int]): Trạng thái hiện tại (row, col)
@@ -45,18 +60,41 @@ class SARSAAgent(BaseAgent):
         Returns:
             int: Hành động được chọn
         """
+        # Tăng số lần thăm trạng thái này
+        self.state_visits[state] += 1
+        
+        # Tìm các hành động dẫn đến trạng thái chưa thăm
         row, col = state
+        unvisited_actions = []
         
-        # Chiến lược Epsilon-greedy
-        if self.rng.random() < self.epsilon:
-            # Khám phá: chọn ngẫu nhiên một hành động
-            action = self.rng.randint(0, self.action_size)
+        for action in range(self.action_size):
+            # Các hướng: 0: lên, 1: xuống, 2: trái, 3: phải
+            directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+            dr, dc = directions[action]
+            new_row, new_col = row + dr, col + dc
+            
+            # Kiểm tra nếu vị trí mới hợp lệ và chưa được thăm nhiều
+            if 0 <= new_row < self.state_size[0] and 0 <= new_col < self.state_size[1]:
+                if self.state_visits[new_row, new_col] < 5:  # Ưu tiên ô chưa thăm hoặc thăm ít
+                    unvisited_actions.append(action)
+        
+        # Ưu tiên khám phá các trạng thái chưa thăm
+        if unvisited_actions and self.rng.random() < self.epsilon * 1.5:  # Tăng xác suất khám phá
+            return self.rng.choice(unvisited_actions)
+        # Khám phá ngẫu nhiên với xác suất epsilon
+        elif self.rng.random() < self.epsilon:
+            return self.rng.randint(0, self.action_size)
         else:
-            # Khai thác: chọn hành động có giá trị Q cao nhất
-            action = np.argmax(self.q_table[row, col])
+            # Khai thác (chọn hành động có giá trị Q cao nhất)
+            q_values = self.q_table[state]
+            max_q = np.max(q_values)
+            
+            # Nếu có nhiều hành động có giá trị Q bằng nhau, chọn ngẫu nhiên một trong số đó
+            actions_with_max_q = np.where(q_values == max_q)[0]
+            action = self.rng.choice(actions_with_max_q)
         
-        # Lưu trữ hành động hiện tại để sử dụng trong learn()
-        self.current_action = action
+        # Tăng số lần thực hiện hành động này
+        self.action_counts[state[0], state[1], action] += 1
         
         return action
     
@@ -64,87 +102,249 @@ class SARSAAgent(BaseAgent):
               reward: float, next_state: Tuple[int, int], 
               done: bool, next_action: Optional[int] = None) -> None:
         """
-        Cập nhật Q-table dựa trên trải nghiệm hiện tại.
-        
-        Công thức cập nhật SARSA:
-        Q(s,a) = Q(s,a) + α * [r + γ * Q(s',a') - Q(s,a)]
+        Cập nhật Q-table sử dụng thuật toán SARSA.
         
         Args:
-            state (Tuple[int, int]): Trạng thái hiện tại (row, col)
+            state (Tuple[int, int]): Trạng thái hiện tại
             action (int): Hành động được thực hiện
             reward (float): Phần thưởng nhận được
             next_state (Tuple[int, int]): Trạng thái tiếp theo
             done (bool): True nếu episode kết thúc
-            next_action (int, optional): Hành động tiếp theo được chọn từ hàm choose_action
+            next_action (int, optional): Hành động tiếp theo
         """
-        row, col = state
-        next_row, next_col = next_state
+        # Lấy giá trị Q hiện tại cho cặp (state, action)
+        current_q = self.q_table[state[0], state[1], action]
         
-        # Nếu next_action không được cung cấp, sử dụng hành động đã lưu từ lần gọi choose_action gần nhất
-        if next_action is None:
-            next_action = self.current_action
-        
-        # Giá trị Q hiện tại
-        current_q = self.q_table[row, col, action]
-        
-        # Giá trị Q tiếp theo (sử dụng hành động tiếp theo thay vì giá trị lớn nhất như trong Q-learning)
+        # Tính toán giá trị Q mới
         if done:
-            # Nếu là trạng thái kết thúc, không có phần thưởng từ trạng thái tiếp theo
+            # Nếu đã kết thúc episode, không có trạng thái tiếp theo
             next_q = 0
         else:
-            next_q = self.q_table[next_row, next_col, next_action]
+            if self.use_expected_sarsa:
+                # Expected SARSA: tính giá trị kỳ vọng của Q(s', a')
+                # Dựa trên phân phối hành động theo chính sách epsilon-greedy
+                q_values = self.q_table[next_state[0], next_state[1]]
+                max_action = np.argmax(q_values)
+                
+                # Xác suất chọn hành động max là (1 - epsilon) + epsilon / action_size
+                # Xác suất chọn hành động khác là epsilon / action_size
+                greedy_prob = 1 - self.epsilon + self.epsilon / self.action_size
+                non_greedy_prob = self.epsilon / self.action_size
+                
+                # Tính giá trị kỳ vọng
+                expected_q = 0
+                for a in range(self.action_size):
+                    if a == max_action:
+                        expected_q += greedy_prob * q_values[a]
+                    else:
+                        expected_q += non_greedy_prob * q_values[a]
+                
+                next_q = expected_q
+            else:
+                # SARSA thông thường: sử dụng hành động tiếp theo đã chọn
+                if next_action is None:
+                    # Nếu không được cung cấp hành động tiếp theo, tự chọn
+                    next_action = self.choose_action(next_state)
+                
+                next_q = self.q_table[next_state[0], next_state[1], next_action]
         
-        # Tính toán target Q-value theo công thức SARSA
+        # Tính toán mục tiêu Q dựa trên công thức SARSA
         target_q = reward + self.gamma * next_q
         
-        # Cập nhật Q-table
-        self.q_table[row, col, action] += self.lr * (target_q - current_q)
+        # Cập nhật giá trị Q với tốc độ học thích ứng
+        # Giảm learning rate cho các trạng thái đã thăm nhiều lần
+        adaptive_lr = self.lr / (1 + 0.1 * self.state_visits[state])
+        self.q_table[state[0], state[1], action] += adaptive_lr * (target_q - current_q)
+        
+        # Lưu trải nghiệm vào buffer
+        self.add_experience((state, action, reward, next_state, done))
     
-    def train_episode(self, env, max_steps=1000) -> Tuple[float, int]:
+    def train(self, env, num_episodes: int = 1000, max_steps: int = 1000,
+              verbose: bool = True, save_path: Optional[str] = None,
+              save_interval: int = 100, replay_batch_size: int = 32) -> Dict[str, List]:
         """
-        Huấn luyện agent qua một episode.
+        Huấn luyện agent sử dụng thuật toán SARSA.
         
         Args:
             env: Môi trường mê cung
-            max_steps (int): Số bước tối đa trong một episode
+            num_episodes (int): Số lượng episode huấn luyện
+            max_steps (int): Số bước tối đa trong mỗi episode
+            verbose (bool): Hiển thị thông tin huấn luyện
+            save_path (str, optional): Đường dẫn lưu mô hình
+            save_interval (int): Khoảng thời gian lưu mô hình
+            replay_batch_size (int): Kích thước batch cho experience replay
             
         Returns:
-            Tuple[float, int]: (Tổng phần thưởng, Số bước thực hiện)
+            Dict[str, List]: Kết quả huấn luyện (reward, steps)
         """
-        # Reset môi trường
-        state = env.reset()
+        # Khởi tạo lại danh sách theo dõi
+        self.episode_rewards = []
+        self.steps_per_episode = []
         
-        # Chọn hành động đầu tiên
-        action = self.choose_action(state)
-        
-        total_reward = 0
-        steps = 0
-        done = False
-        
-        # Vòng lặp cho mỗi bước trong episode
-        while not done and steps < max_steps:
-            # Thực hiện hành động và nhận kết quả
-            next_state, reward, done, _ = env.step(action)
+        # Huấn luyện qua các episode
+        for episode in range(num_episodes):
+            # Reset môi trường
+            state = env.reset()
+            episode_reward = 0
+            step = 0
             
-            # Chọn hành động tiếp theo từ trạng thái mới (khác với Q-learning)
-            next_action = self.choose_action(next_state)
+            # Chọn hành động đầu tiên
+            action = self.choose_action(state)
             
-            # Cập nhật Q-table
-            self.learn(state, action, reward, next_state, done, next_action)
+            while step < max_steps:
+                # Thực hiện hành động
+                next_state, reward, done, _ = env.step(action)
+                
+                # Chọn hành động tiếp theo (cần thiết cho SARSA)
+                next_action = self.choose_action(next_state) if not done else None
+                
+                # Học từ trải nghiệm
+                self.learn(state, action, reward, next_state, done, next_action)
+                
+                # Experience replay mỗi 10 bước
+                if step % 10 == 0 and len(self.experience_buffer) > replay_batch_size:
+                    self.replay_experiences(batch_size=replay_batch_size)
+                
+                # Cập nhật trạng thái và hành động
+                state = next_state
+                action = next_action if next_action is not None else 0  # Không quan trọng nếu done = True
+                episode_reward += reward
+                step += 1
+                
+                # Nếu đã đạt đến đích, kết thúc episode
+                if done:
+                    break
             
-            # Chuyển sang trạng thái tiếp theo
-            state = next_state
-            action = next_action
+            # Lưu thông tin episode
+            self.episode_rewards.append(episode_reward)
+            self.steps_per_episode.append(step)
             
-            # Cập nhật tổng phần thưởng và số bước
-            total_reward += reward
-            steps += 1
+            # Giảm tỷ lệ khám phá
+            self.decay_exploration()
+            
+            # Hiển thị tiến độ
+            if verbose and (episode + 1) % 10 == 0:
+                print(f"Episode {episode + 1}/{num_episodes}, Reward: {episode_reward:.2f}, Steps: {step}, Epsilon: {self.epsilon:.4f}")
+            
+            # Lưu mô hình định kỳ
+            if save_path and (episode + 1) % save_interval == 0:
+                self.save_model(f"{save_path}/sarsa_episode_{episode + 1}.pkl")
         
-        # Giảm tỷ lệ khám phá
-        self.decay_exploration()
+        # Lưu mô hình cuối cùng
+        if save_path:
+            self.save_model(f"{save_path}/sarsa_final.pkl")
         
-        # Lưu lại thông tin huấn luyện
-        self.episode_rewards.append(total_reward)
-        self.steps_per_episode.append(steps)
+        # Trả về kết quả huấn luyện
+        return {
+            "rewards": self.episode_rewards,
+            "steps": self.steps_per_episode
+        }
+    
+    def get_policy(self) -> np.ndarray:
+        """
+        Lấy chính sách tốt nhất từ Q-table.
         
-        return total_reward, steps
+        Returns:
+            np.ndarray: Ma trận chứa hành động tốt nhất cho mỗi trạng thái
+        """
+        height, width = self.state_size
+        policy = np.zeros((height, width), dtype=int)
+        
+        for r in range(height):
+            for c in range(width):
+                policy[r, c] = np.argmax(self.q_table[r, c])
+        
+        return policy
+    
+    def get_value_function(self) -> np.ndarray:
+        """
+        Lấy hàm giá trị từ Q-table.
+        
+        Returns:
+            np.ndarray: Ma trận chứa giá trị tốt nhất cho mỗi trạng thái
+        """
+        height, width = self.state_size
+        value_function = np.zeros((height, width))
+        
+        for r in range(height):
+            for c in range(width):
+                value_function[r, c] = np.max(self.q_table[r, c])
+        
+        return value_function
+    
+    def visualize_policy(self, maze: np.ndarray) -> None:
+        """
+        Hiển thị chính sách tốt nhất trên mê cung.
+        
+        Args:
+            maze (np.ndarray): Ma trận mê cung
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import ListedColormap
+        
+        # Lấy chính sách tốt nhất
+        policy = self.get_policy()
+        
+        # Tạo bản sao mê cung
+        maze_copy = maze.copy()
+        
+        # Danh sách các ký hiệu hướng
+        directions = ['↑', '↓', '←', '→']
+        
+        # Kích thước mê cung
+        height, width = maze.shape
+        
+        plt.figure(figsize=(10, 10))
+        
+        # Hiển thị mê cung
+        cmap = ListedColormap(['white', 'black', 'green', 'red'])
+        plt.imshow(maze_copy, cmap=cmap)
+        
+        # Hiển thị chính sách
+        for r in range(height):
+            for c in range(width):
+                if maze_copy[r, c] == 0:  # Chỉ hiển thị chính sách ở các ô đường đi
+                    plt.text(c, r, directions[policy[r, c]], 
+                             ha='center', va='center', color='blue', fontsize=12)
+        
+        plt.grid(True, color='gray', linestyle='-', linewidth=0.5)
+        plt.title('Chính sách tốt nhất')
+        plt.tight_layout()
+        plt.show()
+    
+    def visualize_value_function(self, maze: np.ndarray) -> None:
+        """
+        Hiển thị hàm giá trị trên mê cung.
+        
+        Args:
+            maze (np.ndarray): Ma trận mê cung
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.colors as colors
+        
+        # Lấy hàm giá trị
+        value_function = self.get_value_function()
+        
+        # Tạo bản sao mê cung
+        maze_copy = maze.copy()
+        
+        # Kích thước mê cung
+        height, width = maze.shape
+        
+        plt.figure(figsize=(10, 10))
+        
+        # Hiển thị mê cung
+        plt.imshow(maze_copy, cmap='binary')
+        
+        # Hiển thị hàm giá trị
+        for r in range(height):
+            for c in range(width):
+                if maze_copy[r, c] == 0:  # Chỉ hiển thị giá trị ở các ô đường đi
+                    color = 'green' if value_function[r, c] > 0 else 'red'
+                    plt.text(c, r, f"{value_function[r, c]:.1f}", 
+                             ha='center', va='center', color=color, fontsize=8)
+        
+        plt.grid(True, color='gray', linestyle='-', linewidth=0.5)
+        plt.title('Hàm giá trị')
+        plt.tight_layout()
+        plt.show()

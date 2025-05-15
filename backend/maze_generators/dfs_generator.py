@@ -1,3 +1,4 @@
+# dfs_generator.py
 import numpy as np 
 from typing import Tuple, List, Set 
 from .base_generator import BaseMazeGenerator

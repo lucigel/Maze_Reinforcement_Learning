@@ -1,95 +1,48 @@
 # config.py
-
-"""
-Cấu hình và các hằng số cho dự án học tăng cường trên mê cung.
-"""
-
-# Cấu hình chung
 PROJECT_NAME = "Maze Reinforcement Learning"
 VERSION = "1.0.0"
 
-# Thư mục
-MODEL_DIR = "models"
-Q_LEARNING_MODEL_DIR = f"{MODEL_DIR}/q_learning"
-SARSA_MODEL_DIR = f"{MODEL_DIR}/sarsa"
-MAZE_DIR = "mazes"
-
-# Cấu hình mê cung
 MAZE_SIZES = {
-    "small": (10, 10),
-    "medium": (15, 15),
-    "large": (20, 20),
-    "xlarge": (30, 30)
+    "small": (11, 11),  # Mê cung 11x11
+    "medium": (15, 15), # Mê cung 15x15
+    "large": (21, 21),  # Mê cung 21x21
+    "xlarge": (31, 31)  # Mê cung 31x31
 }
 
-# Hằng số mê cung
-PATH = 0
-WALL = 1
-START = 2
-GOAL = 3
+# Tham số học tăng cường
+LEARNING_RATE = 0.2         # Tốc độ học cao hơn (Alpha)
+DISCOUNT_FACTOR = 0.99      # Hệ số giảm cao hơn (Gamma)
+EXPLORATION_RATE = 1.0      # Tỷ lệ khám phá ban đầu (Epsilon)
+EXPLORATION_DECAY = 0.998   # Giảm chậm hơn
+MIN_EXPLORATION = 0.01      # Mức khám phá tối thiểu cao hơn
 
-# Hướng di chuyển
-UP = 0
-RIGHT = 1
-DOWN = 2
-LEFT = 3
-ACTIONS = [UP, RIGHT, DOWN, LEFT]
-ACTION_NAMES = ["UP", "RIGHT", "DOWN", "LEFT"]
-ACTION_VECTORS = [(0, -1), (1, 0), (0, 1), (-1, 0)]  # (dx, dy) for [UP, RIGHT, DOWN, LEFT]
+# Tham số môi trường
+MOVE_REWARD = -0.1          # Giảm phạt cho mỗi bước di chuyển
+WALL_PENALTY = -2.0         # Giảm phạt khi đi vào tường
+GOAL_REWARD = 100.0         # Phần thưởng khi đến đích
+TIME_PENALTY = -0.01        # Giảm phạt theo thời gian
+MAX_STEPS = 2000            # Tăng số bước tối đa
 
-# Cấu hình môi trường
-MOVE_REWARD = -1.0       # Phần thưởng cho mỗi bước đi
-WALL_PENALTY = -5.0      # Phạt khi đi vào tường
-GOAL_REWARD = 100.0      # Phần thưởng khi đến đích
-TIME_PENALTY = -0.1      # Phạt theo thời gian
-MAX_STEPS = 1000         # Số bước tối đa trong một episode
+# Tham số huấn luyện
+TRAINING_EPISODES = 2000    # Tăng số episode
+EVAL_INTERVAL = 100         # Đánh giá sau mỗi 100 episode
 
-# Cấu hình huấn luyện
-TRAINING_EPISODES = 1000  # Số episode huấn luyện
-EVAL_INTERVAL = 100       # Đánh giá sau bao nhiêu episode
-RENDER_INTERVAL = 200     # Hiển thị môi trường sau bao nhiêu episode
+# Đường dẫn mô hình
+Q_LEARNING_MODEL_DIR = "./models/q_learning"
+SARSA_MODEL_DIR = "./models/sarsa"
 
-# Tham số Q-Learning
-LEARNING_RATE = 0.1        # Tốc độ học (alpha)
-DISCOUNT_FACTOR = 0.95     # Hệ số giảm (gamma)
-EXPLORATION_RATE = 1.0     # Tỷ lệ khám phá ban đầu (epsilon)
-EXPLORATION_DECAY = 0.995  # Tốc độ giảm tỷ lệ khám phá
-MIN_EXPLORATION = 0.01     # Giá trị nhỏ nhất của tỷ lệ khám phá
+# Hạt giống ngẫu nhiên
+RANDOM_SEED = 42
 
-# Cấu hình hiển thị
-CONSOLE_OUTPUT = True     # Hiển thị trên console
-MATPLOTLIB_OUTPUT = True  # Hiển thị bằng matplotlib
-FIGSIZE = (10, 10)        # Kích thước figure cho matplotlib
+# Tham số mới cho Experience Replay
+REPLAY_BUFFER_SIZE = 10000  # Kích thước buffer
+REPLAY_BATCH_SIZE = 64      # Kích thước batch
 
-# Cài đặt đánh giá
-EVAL_EPISODES = 100       # Số episode để đánh giá
-RANDOM_SEED = 42          # Hạt giống ngẫu nhiên cho tính tái tạo
+# Tham số cho Double Q-Learning
+USE_DOUBLE_Q = True
+TARGET_UPDATE_STEPS = 500
 
-# Các cấu hình cho các thuật toán sinh mê cung
-MAZE_GENERATORS = {
-    "dfs": "DFSMazeGenerator",
-    "prim": "PrimMazeGenerator",
-    "wilson": "WilsonMazeGenerator"
-}
-
-# Các thuật toán học tăng cường
-RL_AGENTS = {
-    "q_learning": "QLearningAgent",
-    "sarsa": "SARSAAgent"
-}
-
-# Định dạng tên file để lưu mô hình
+# Phương thức để lấy tên file mô hình
 def get_model_filename(agent_type, maze_size, episodes):
-    """
-    Tạo tên file để lưu mô hình.
-    
-    Args:
-        agent_type (str): Loại agent (q_learning, sarsa)
-        maze_size (tuple): Kích thước mê cung (height, width)
-        episodes (int): Số episode đã huấn luyện
-        
-    Returns:
-        str: Tên file
-    """
     height, width = maze_size
-    return f"{agent_type}_maze_{height}x{width}_ep{episodes}.pkl"
+    return f"{agent_type}_{height}x{width}_{episodes}ep.pkl"

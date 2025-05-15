@@ -1,0 +1,181 @@
+/* App.css - Các styles chung cho toàn bộ ứng dụng */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  line-height: 1.6;
+  color: #333;
+  background-color: #f5f5f5;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.main-content {
+  flex: 1;
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin-bottom: 0.8em;
+  color: #2c3e50;
+}
+
+h2 {
+  font-size: 1.8rem;
+  border-bottom: 2px solid #e0e0e0;
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+}
+
+h3 {
+  font-size: 1.4rem;
+  margin-top: 20px;
+}
+
+p {
+  margin-bottom: 1rem;
+}
+
+/* Styles cho buttons */
+.btn {
+  display: inline-block;
+  font-weight: 500;
+  text-align: center;
+  vertical-align: middle;
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  line-height: 1.5;
+  border-radius: 0.3rem;
+  transition: all 0.2s ease-in-out;
+  margin: 0.25rem;
+  border: none;
+  outline: none;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background-color: #3498db;
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #2980b9;
+}
+
+.btn-secondary {
+  background-color: #95a5a6;
+  color: #fff;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: #7f8c8d;
+}
+
+.btn-success {
+  background-color: #2ecc71;
+  color: #fff;
+}
+
+.btn-success:hover:not(:disabled) {
+  background-color: #27ae60;
+}
+
+.btn-outline {
+  background-color: transparent;
+  border: 1px solid #bdc3c7;
+  color: #34495e;
+}
+
+.btn-outline:hover:not(:disabled) {
+  background-color: #ecf0f1;
+}
+
+.btn-control {
+  background-color: #34495e;
+  color: #fff;
+}
+
+.btn-control:hover:not(:disabled) {
+  background-color: #2c3e50;
+}
+
+/* Form controls */
+input, select {
+  padding: 0.5rem;
+  font-size: 1rem;
+  border: 1px solid #bdc3c7;
+  border-radius: 0.3rem;
+  margin-bottom: 1rem;
+}
+
+input[type="number"] {
+  width: 80px;
+}
+
+input[type="range"] {
+  width: 100%;
+}
+
+.input-group {
+  margin-bottom: 0.5rem;
+}
+
+label {
+  display: inline-block;
+  margin-right: 0.5rem;
+  font-weight: 500;
+}
+
+/* Utility classes */
+.error-message {
+  color: #e74c3c;
+  background-color: #fadbd8;
+  padding: 10px;
+  border-radius: 5px;
+  margin: 10px 0;
+}
+
+.status-display {
+  margin-top: 20px;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  border-left: 4px solid #3498db;
+}
+
+/* Media queries */
+@media (max-width: 768px) {
+  .main-content {
+    padding: 10px;
+  }
+  
+  h2 {
+    font-size: 1.5rem;
+  }
+  
+  h3 {
+    font-size: 1.2rem;
+  }
+  
+  .btn {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.9rem;
+  }
+}

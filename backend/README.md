@@ -1,73 +1,98 @@
-maze_reinforcement_learning/
-│
-├── backend/
-│   ├── maze_generators/
+maze-solver-project/
+├── backend/                           # Backend - Python FastAPI
+│   ├── maze_generators/               # Thuật toán sinh mê cung (vẫn giữ nhưng chỉ để training)
 │   │   ├── __init__.py
-│   │   ├── base_generator.py       # Lớp cơ sở cho các bộ sinh mê cung
-│   │   ├── dfs_generator.py        # Thuật toán DFS để sinh mê cung
-│   │   ├── prim_generator.py       # Thuật toán Prim để sinh mê cung
-│   │   └── wilson_generator.py     # Thuật toán Wilson để sinh mê cung
+│   │   ├── base_generator.py          
+│   │   ├── dfs_generator.py           
+│   │   ├── prim_generator.py          
+│   │   └── wilson_generator.py        
 │   │
-│   ├── rl_agents/
+│   ├── rl_agents/                     # Thuật toán học tăng cường
 │   │   ├── __init__.py
-│   │   ├── base_agent.py           # Lớp cơ sở cho các agent học tăng cường
-│   │   ├── q_learning.py           # Thuật toán Q-Learning
-│   │   └── sarsa.py                # Thuật toán SARSA
+│   │   ├── base_agent.py              
+│   │   ├── q_learning.py              
+│   │   └── sarsa.py                   
 │   │
-│   ├── environment/
+│   ├── environment/                   # Môi trường mê cung
 │   │   ├── __init__.py
-│   │   └── maze_env.py             # Môi trường mê cung
+│   │   └── maze_env.py                # Cần bổ sung khả năng nhận mê cung từ frontend
 │   │
-│   ├── utils/
+│   ├── utils/                         
 │   │   ├── __init__.py
-│   │   ├── config.py               # Cấu hình và hằng số
-│   │   ├── data_handler.py         # Xử lý dữ liệu (lưu/tải Q-table)
-│   │   └── visualization.py        # Hiển thị mê cung và kết quả (backend)
+│   │   ├── config.py                  
+│   │   ├── data_handler.py            
+│   │   └── visualization.py           
 │   │
-│   ├── models/                     # Thư mục lưu các mô hình đã huấn luyện
+│   ├── models/                        # Lưu mô hình đã huấn luyện
 │   │   ├── q_learning/
-│   │   │   ├── maze_10x10.pkl      # Q-table cho mê cung 10x10
-│   │   │   └── maze_20x20.pkl      # Q-table cho mê cung 20x20
+│   │   │   ├── maze_10x10.pkl         
+│   │   │   └── maze_20x20.pkl         
 │   │   └── sarsa/
 │   │       ├── maze_10x10.pkl
 │   │       └── maze_20x20.pkl
 │   │
-│   ├── training.py                 # Script để huấn luyện các mô hình
-│   ├── evaluation.py               # Script để đánh giá hiệu suất các mô hình
-│   └── api.py                      # API để kết nối với frontend (Flask/FastAPI)
+│   ├── api.py                         # Thêm endpoint solve_maze
+│   └── [các file khác]
 │
-├── frontend/
-│   ├── static/
-│   │   ├── css/
-│   │   │   ├── main.css            # Styles chính
-│   │   │   └── maze.css            # Styles riêng cho hiển thị mê cung
-│   │   │
-│   │   ├── js/
-│   │   │   ├── main.js             # Logic chính của ứng dụng
-│   │   │   ├── mazeRenderer.js     # Hiển thị mê cung trên canvas
-│   │   │   ├── agentSimulator.js   # Mô phỏng quá trình giải mê cung của agent
-│   │   │   └── api.js              # Xử lý các yêu cầu API đến backend
-│   │   │
-│   │   └── assets/                 # Hình ảnh và tài nguyên
-│   │       ├── agent.png           # Hình ảnh đại diện cho agent
-│   │       ├── start.png           # Hình ảnh điểm bắt đầu
-│   │       └── goal.png            # Hình ảnh điểm đích
+├── frontend/                          # Frontend - React
+│   ├── public/
+│   │   └── [các file hiện có]
 │   │
-│   ├── templates/
-│   │   ├── index.html              # Trang chính
-│   │   ├── simulation.html         # Trang mô phỏng
-│   │   └── analysis.html           # Trang phân tích kết quả
+│   ├── src/
+│   │   ├── App.js                     
+│   │   ├── index.js                   
+│   │   │
+│   │   ├── api/
+│   │   │   └── mazeApi.js             # Thêm hàm solveMaze để gọi API
+│   │   │
+│   │   ├── algorithms/                # Thư mục mới: Thuật toán JS cho frontend
+│   │   │   ├── mazeGenerators/        
+│   │   │   │   ├── dfsGenerator.js    # Thuật toán DFS bằng JS
+│   │   │   │   ├── primGenerator.js   # Thuật toán Prim bằng JS
+│   │   │   │   └── wilsonGenerator.js # Thuật toán Wilson bằng JS
+│   │   │   └── utils/
+│   │   │       ├── mazeUtils.js       # Các tiện ích xử lý mê cung
+│   │   │       └── animationUtils.js  # Xử lý animation
+│   │   │
+│   │   ├── components/
+│   │   │   ├── Common/                # Components chung
+│   │   │   │   └── [các file hiện có]
+│   │   │   │
+│   │   │   ├── MazeGenerator/         # Components cho trang sinh mê cung
+│   │   │   │   ├── GeneratorPage.js   # Gọi thuật toán JS thay vì API
+│   │   │   │   ├── GeneratorControls.js
+│   │   │   │   ├── MazeCanvas.js      # Canvas hiển thị quá trình sinh
+│   │   │   │   ├── StepControls.js    
+│   │   │   │   └── SaveMazeButton.js  # Component mới: nút Lưu mê cung
+│   │   │   │
+│   │   │   └── MazeSolver/            # Components cho trang giải mê cung
+│   │   │       ├── SolverPage.js
+│   │   │       ├── ModelSelector.js   
+│   │   │       ├── MazeSelector.js    # Component mới: chọn mê cung đã lưu
+│   │   │       ├── MazeVisualization.js
+│   │   │       ├── MouseVisualization.js
+│   │   │       ├── ValueFunctionHeatmap.js # Hiển thị Q-values từ backend
+│   │   │       └── PerformanceStats.js
+│   │   │
+│   │   ├── hooks/                     # Custom hooks
+│   │   │   ├── useMazeGenerator.js    # Hook để quản lý quá trình sinh mê cung
+│   │   │   └── useMazeSolver.js       # Hook để quản lý quá trình giải mê cung
+│   │   │
+│   │   ├── context/                   # Thư mục mới: Context API
+│   │   │   └── MazeContext.js         # Lưu trữ trạng thái mê cung toàn cục
+│   │   │
+│   │   ├── utils/                     # Tiện ích chung
+│   │   │   ├── storageUtils.js        # Xử lý localStorage/sessionStorage
+│   │   │   └── mazeConversion.js      # Chuyển đổi giữa các định dạng mê cung
+│   │   │
+│   │   └── styles/                    
+│   │       └── [các file hiện có]
 │   │
-│   └── models/                     # Thư mục chứa các mô hình được xuất để sử dụng trong web
-│       └── exported/               # Các mô hình được chuyển đổi để sử dụng trên web
-│           ├── q_learning_10x10.json  # Q-table được chuyển thành JSON
-│           └── sarsa_10x10.json       # Q-table được chuyển thành JSON
-│
-├── scripts/
-│   ├── convert_model.py            # Script chuyển đổi từ pkl sang JSON
-│   ├── generate_dataset.py         # Script để tạo bộ mê cung đa dạng
-│   └── export_results.py           # Script xuất kết quả phân tích
-│
-├── README.md                       # Tài liệu hướng dẫn
-├── requirements.txt                # Các thư viện Python cần thiết
-└── server.py                       # Script chính để chạy ứng dụng web
+│   └── [các file khác]
+└── [các file khác]
+
+### Scripts training 
+
+```python
+    python training.py --agent sarsa --maze dfs --size small --episodes 10000 --lr 0.2 --gamma 0.99 --epsilon 1.0 --decay 0.999
+```

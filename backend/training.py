@@ -1,374 +1,242 @@
 # training.py
-
 import os
-import time
 import numpy as np
-import matplotlib.pyplot as plt
-from typing import Optional, Tuple, Dict, Any, List
+import argparse
+import time
+from pathlib import Path
 
-# Import các module cần thiết
-from backend.maze_generators.dfs_generator import DFSMazeGenerator
-from backend.environment.maze_env import MazeEnvironment
-from backend.rl_agents.q_learning import QLearningAgent
-from backend.utils.config import get_training_config
-from backend.utils.visualization import plot_training_progress, plot_q_value_heatmap
+from maze_generators.dfs_generator import DFSMazeGenerator
+from maze_generators.prim_generator import PrimMazeGenerator
+from maze_generators.wilson_generator import WilsonMazeGenerator
+from enviroment.maze_env import MazeEnvironment
+from rl_agents.q_learning import QLearningAgent
+from rl_agents.sarsa import SARSAAgent
+from utils.config import *
+from utils.data_handler import save_model
+from utils.visualization import visualize_training_results
 
-def train_agent(maze_size: Tuple[int, int] = (10, 10),
-                agent_type: str = "q_learning",
-                num_episodes: int = 1000,
-                max_steps_per_episode: int = 500,
-                save_path: Optional[str] = None,
-                save_interval: int = 100,
-                render_interval: int = 0,
-                verbose: bool = True,
-                seed: Optional[int] = None) -> Tuple[Dict[str, List[float]], Any]:
-    """
-    Huấn luyện một agent học tăng cường trên môi trường mê cung.
+def parse_arguments():
+    print(f"Parsing arguments for {PROJECT_NAME}")
+    parser = argparse.ArgumentParser(description=f"{PROJECT_NAME} Training")
+    parser.add_argument('--agent', type=str, default='q_learning', choices=['q_learning', 'sarsa'],
+                        help='Thuật toán học tăng cường (q_learning, sarsa)')
+    parser.add_argument('--maze', type=str, default='dfs', choices=['dfs', 'prim', 'wilson'],
+                        help='Thuật toán sinh mê cung (dfs, prim, wilson)')
+    parser.add_argument('--size', type=str, default='small', choices=['small', 'medium', 'large', 'xlarge'],
+                        help='Kích thước mê cung (small, medium, large, xlarge)')
+    parser.add_argument('--episodes', type=int, default=TRAINING_EPISODES,
+                        help=f'Số episode huấn luyện (mặc định: {TRAINING_EPISODES})')
+    parser.add_argument('--lr', type=float, default=LEARNING_RATE,
+                        help=f'Tốc độ học (mặc định: {LEARNING_RATE})')
+    parser.add_argument('--gamma', type=float, default=DISCOUNT_FACTOR,
+                        help=f'Hệ số giảm (mặc định: {DISCOUNT_FACTOR})')
+    parser.add_argument('--epsilon', type=float, default=EXPLORATION_RATE,
+                        help=f'Tỷ lệ khám phá ban đầu (mặc định: {EXPLORATION_RATE})')
+    parser.add_argument('--decay', type=float, default=EXPLORATION_DECAY,
+                        help=f'Tốc độ giảm tỷ lệ khám phá (mặc định: {EXPLORATION_DECAY})')
+    parser.add_argument('--seed', type=int, default=RANDOM_SEED,
+                        help=f'Hạt giống ngẫu nhiên (mặc định: {RANDOM_SEED})')
+    parser.add_argument('--render', action='store_true',
+                        help='Hiển thị môi trường trong quá trình huấn luyện')
+    parser.add_argument('--no-console', dest='console', action='store_false',
+                        help='Tắt hiển thị trên console')
+    parser.add_argument('--results-dir', type=str, default='results',
+                        help='Thư mục lưu kết quả')
     
-    Args:
-        maze_size (Tuple[int, int]): Kích thước mê cung (height, width)
-        agent_type (str): Loại agent ("q_learning" hoặc "sarsa")
-        num_episodes (int): Số lượng episode huấn luyện
-        max_steps_per_episode (int): Số bước tối đa trong mỗi episode
-        save_path (str, optional): Đường dẫn để lưu mô hình
-        save_interval (int): Khoảng cách episode để lưu mô hình
-        render_interval (int): Khoảng cách episode để hiển thị môi trường (0 để tắt)
-        verbose (bool): Hiển thị thông tin trong quá trình huấn luyện
-        seed (int, optional): Hạt giống cho tính nhất quán
-    
-    Returns:
-        Tuple[Dict[str, List[float]], Any]: Tuple gồm (lịch sử huấn luyện, agent đã học)
-    """
-    # Lấy cấu hình từ config
+    return parser.parse_args()
+
+def create_maze_generator(generator_type, maze_size):
     height, width = maze_size
-    config = get_training_config(agent_type, maze_size)
+    if generator_type == 'dfs':
+        return DFSMazeGenerator(width=width, height=height)
+    elif generator_type == 'prim':
+        return PrimMazeGenerator(width=width, height=height)
+    elif generator_type == 'wilson':
+        return WilsonMazeGenerator(width=width, height=height)
+    else:
+        raise ValueError(f"Thuật toán sinh mê cung không hợp lệ: {generator_type}")
+
+# training.py (chỉ cập nhật hàm create_agent)
+
+def create_agent(agent_type, state_size, action_size, args):
+    if agent_type == 'q_learning':
+        return QLearningAgent(
+            state_size=state_size,
+            action_size=action_size,
+            learning_rate=args.lr,
+            discount_factor=args.gamma,
+            exploration_rate=args.epsilon,
+            exploration_decay=args.decay,
+            min_exploration_rate=MIN_EXPLORATION,
+            seed=args.seed,
+            use_double_q=USE_DOUBLE_Q  # Thêm tham số mới
+        )
+    elif agent_type == 'sarsa':
+        return SARSAAgent(
+            state_size=state_size,
+            action_size=action_size,
+            learning_rate=args.lr,
+            discount_factor=args.gamma,
+            exploration_rate=args.epsilon,
+            exploration_decay=args.decay,
+            min_exploration_rate=MIN_EXPLORATION,
+            seed=args.seed
+        )
+    else:
+        raise ValueError(f"Thuật toán học tăng cường không hợp lệ: {agent_type}")
+
+def save_model_with_history(agent, model_dir, agent_type, maze_size, episodes, episode_history=None):
+    """Lưu mô hình và lịch sử huấn luyện"""
+    # Tạo tên file
+    filename = get_model_filename(agent_type, maze_size, episodes)
     
-    # Tạo bộ sinh mê cung và môi trường
-    if verbose:
-        print(f"Tạo mê cung kích thước {height}x{width} sử dụng DFS...")
+    # Tạo thư mục nếu chưa tồn tại
+    Path(model_dir).mkdir(parents=True, exist_ok=True)
     
-    maze_generator = DFSMazeGenerator(height=height, width=width, seed=seed)
-    env = MazeEnvironment(maze_generator=maze_generator, 
-                         max_steps=max_steps_per_episode,
-                         move_reward=config["move_reward"],
-                         wall_penalty=config["wall_penalty"],
-                         goal_reward=config["goal_reward"],
-                         time_penalty=config["time_penalty"])
+    # Lưu mô hình
+    save_path = os.path.join(model_dir, filename)
+    agent.save_model(save_path)
     
-    # Khởi tạo agent
+    # Lưu lịch sử huấn luyện nếu có
+    if episode_history:
+        history_path = os.path.join(model_dir, f"{filename.replace('.pkl', '_history.npz')}")
+        np.savez(history_path, **episode_history)
+    
+    return save_path
+
+def main():
+    # Parse arguments
+    args = parse_arguments()
+    
+    # Set random seed
+    np.random.seed(args.seed)
+    
+    # Cấu hình dựa trên đối số
+    maze_size = MAZE_SIZES[args.size]
+    maze_generator = create_maze_generator(args.maze, maze_size)
+    
+    # Tạo môi trường mê cung
+    env = MazeEnvironment(
+        maze_generator=maze_generator,
+        max_steps=MAX_STEPS,
+        move_reward=MOVE_REWARD,
+        wall_penalty=WALL_PENALTY,
+        goal_reward=GOAL_REWARD,
+        time_penalty=TIME_PENALTY
+    )
+    
+    # Lấy kích thước không gian trạng thái và hành động
     state_size = env.get_state_size()
     action_size = env.get_action_size()
     
-    if agent_type == "q_learning":
-        agent = QLearningAgent(
-            state_size=state_size,
-            action_size=action_size,
-            learning_rate=config["learning_rate"],
-            discount_factor=config["discount_factor"],
-            exploration_rate=config["exploration_rate"],
-            exploration_decay=config["exploration_decay"],
-            min_exploration_rate=config["min_exploration_rate"],
-            seed=seed
-        )
-    else:  # sarsa
-        from backend.rl_agents.sarsa import SARSAAgent
-        agent = SARSAAgent(
-            state_size=state_size,
-            action_size=action_size,
-            learning_rate=config["learning_rate"],
-            discount_factor=config["discount_factor"],
-            exploration_rate=config["exploration_rate"],
-            exploration_decay=config["exploration_decay"],
-            min_exploration_rate=config["min_exploration_rate"],
-            seed=seed
-        )
+    # Tạo agent
+    agent = create_agent(args.agent, state_size, action_size, args)
     
-    # Thông tin huấn luyện
-    if verbose:
-        print(f"Bắt đầu huấn luyện agent {agent_type.upper()} trên mê cung {height}x{width}...")
-        print(f"Số episode: {num_episodes}")
-        print(f"Epsilon ban đầu: {config['exploration_rate']}")
-        print(f"Learning rate: {config['learning_rate']}")
-        print(f"Discount factor: {config['discount_factor']}")
+    # Tạo thư mục lưu mô hình
+    model_dir = Q_LEARNING_MODEL_DIR if args.agent == 'q_learning' else SARSA_MODEL_DIR
     
-    # Các biến theo dõi
-    training_history = {
-        "episode_rewards": [],
-        "episode_steps": [],
-        "success_rate": [],
-        "epsilon_values": []
-    }
+    print(f"\n{'=' * 50}")
+    print(f"{PROJECT_NAME} - {VERSION}")
+    print(f"{'=' * 50}")
+    print(f"Thuật toán: {args.agent.upper()}")
+    print(f"Bộ sinh mê cung: {args.maze.upper()}")
+    print(f"Kích thước mê cung: {maze_size[0]}x{maze_size[1]} ({args.size})")
+    print(f"Số episode huấn luyện: {args.episodes}")
+    print(f"Tốc độ học (alpha): {args.lr}")
+    print(f"Hệ số giảm (gamma): {args.gamma}")
+    print(f"Tỷ lệ khám phá ban đầu (epsilon): {args.epsilon}")
+    print(f"Tốc độ giảm tỷ lệ khám phá: {args.decay}")
+    print(f"{'=' * 50}\n")
     
-    success_window = []  # Cửa sổ trượt để tính tỷ lệ thành công
+    # Hiển thị môi trường ban đầu
+    if args.render:
+        print("Môi trường mê cung ban đầu:")
+        env.render(mode='console')
+        print("\n")
+    
     start_time = time.time()
     
-    # Vòng lặp huấn luyện
-    for episode in range(1, num_episodes + 1):
-        # Reset môi trường
-        state = env.reset()
-        episode_reward = 0
-        done = False
-        
-        # Hiển thị môi trường nếu cần
-        if render_interval > 0 and episode % render_interval == 0:
-            print(f"\nEpisode {episode}:")
-            env.render(mode='console')
-        
-        # Vòng lặp trong mỗi episode
-        step = 0
-        while not done:
-            # Chọn hành động
-            action = agent.choose_action(state)
-            
-            # Thực hiện hành động
-            next_state, reward, done, info = env.step(action)
-            
-            # Học từ trải nghiệm
-            agent.learn(state, action, reward, next_state, done)
-            
-            # Cập nhật trạng thái và phần thưởng
-            state = next_state
-            episode_reward += reward
-            step += 1
-            
-            # Hiển thị từng bước nếu cần
-            if render_interval > 0 and episode % render_interval == 0:
-                env.render(mode='console')
-                print(f"Bước {step}: Hành động={info['action']}, "
-                      f"Phần thưởng={reward:.1f}, Tổng phần thưởng={episode_reward:.1f}")
-                time.sleep(0.1)  # Làm chậm để quan sát
-        
-        # Giảm tỷ lệ khám phá
-        agent.decay_exploration()
-        
-        # Cập nhật lịch sử huấn luyện
-        training_history["episode_rewards"].append(episode_reward)
-        training_history["episode_steps"].append(step)
-        training_history["epsilon_values"].append(agent.epsilon)
-        
-        # Cập nhật tỷ lệ thành công (cửa sổ trượt 100 episode)
-        success = 1 if info["status"] == "reached_goal" else 0
-        success_window.append(success)
-        if len(success_window) > 100:
-            success_window.pop(0)
-        training_history["success_rate"].append(sum(success_window) / len(success_window))
-        
-        # Hiển thị thông tin huấn luyện
-        if verbose and episode % 10 == 0:
-            avg_reward = np.mean(training_history["episode_rewards"][-10:])
-            avg_steps = np.mean(training_history["episode_steps"][-10:])
-            success_rate = sum(success_window) / len(success_window)
-            
-            print(f"Episode {episode}/{num_episodes} - "
-                  f"Epsilon: {agent.epsilon:.3f}, "
-                  f"Phần thưởng TB: {avg_reward:.1f}, "
-                  f"Bước TB: {avg_steps:.1f}, "
-                  f"Tỷ lệ thành công: {success_rate:.2f}")
-        
-        # Lưu mô hình định kỳ
-        if save_path and save_interval > 0 and episode % save_interval == 0:
-            save_file = os.path.join(save_path, f"{agent_type}_maze_{height}x{width}_ep{episode}.pkl")
-            os.makedirs(os.path.dirname(save_file), exist_ok=True)
-            agent.save_model(save_file)
-            if verbose:
-                print(f"Đã lưu mô hình tại {save_file}")
+    # Huấn luyện agent
+    print(f"Bắt đầu huấn luyện {args.agent.upper()}...")
+    training_results = agent.train(
+        env=env,
+        num_episodes=args.episodes,
+        max_steps=MAX_STEPS,
+        verbose=args.console,
+        save_path=model_dir,
+        save_interval=EVAL_INTERVAL
+    )
+    
+    # Tính thời gian huấn luyện
+    training_time = time.time() - start_time
+    
+    print(f"\nHoàn thành huấn luyện sau {training_time:.2f} giây!")
     
     # Lưu mô hình cuối cùng
-    if save_path:
-        final_save_path = os.path.join(save_path, f"{agent_type}_maze_{height}x{width}_final.pkl")
-        os.makedirs(os.path.dirname(final_save_path), exist_ok=True)
-        agent.save_model(final_save_path)
+    save_path = save_model_with_history(
+        agent, 
+        model_dir, 
+        args.agent, 
+        maze_size, 
+        args.episodes, 
+        training_results
+    )
+    print(f"Đã lưu mô hình cuối cùng tại: {save_path}")
+    
+    # Hiển thị kết quả huấn luyện
+    visualize_training_results(
+        training_results, 
+        agent_type=args.agent, 
+        maze_size=maze_size,
+        save_dir=args.results_dir
+    )
+    
+    # Hiển thị chính sách đã học
+    print("\nChính sách đã học:")
+    agent.visualize_policy(env.maze)
+    
+    # Hiển thị hàm giá trị
+    print("\nHàm giá trị:")
+    agent.visualize_value_function(env.maze)
+    
+    # Kiểm tra agent đã huấn luyện
+    print("\nKiểm tra agent đã huấn luyện:")
+    state = env.reset()
+    done = False
+    total_reward = 0
+    steps = 0
+    
+    while not done and steps < MAX_STEPS:
+        # Chọn hành động theo chính sách đã học (không khám phá)
+        action = np.argmax(agent.q_table[state])
         
-        # Xuất ra định dạng JSON cho web (nếu cần)
-        json_path = os.path.join(save_path, f"{agent_type}_maze_{height}x{width}_final.json")
-        agent.export_to_json(json_path)
+        # Thực hiện hành động
+        next_state, reward, done, _ = env.step(action)
         
-        if verbose:
-            print(f"Đã lưu mô hình cuối cùng tại {final_save_path}")
-            print(f"Đã xuất mô hình ra JSON tại {json_path}")
-    
-    # Thống kê thời gian huấn luyện
-    training_time = time.time() - start_time
-    if verbose:
-        print(f"\nHoàn thành huấn luyện sau {training_time:.2f} giây.")
-        print(f"Tỷ lệ thành công cuối cùng: {training_history['success_rate'][-1]:.2f}")
-        print(f"Phần thưởng trung bình (100 episode cuối): "
-              f"{np.mean(training_history['episode_rewards'][-100:]):.1f}")
-    
-    return training_history, agent
-
-def evaluate_agent(agent: Any, maze_size: Tuple[int, int] = (10, 10),
-                  num_episodes: int = 100, render: bool = False,
-                  seed: Optional[int] = None) -> Dict[str, float]:
-    """
-    Đánh giá hiệu suất của agent đã huấn luyện.
-    
-    Args:
-        agent (Any): Agent đã huấn luyện (QLearningAgent hoặc SARSAAgent)
-        maze_size (Tuple[int, int]): Kích thước mê cung để đánh giá
-        num_episodes (int): Số lượng episode đánh giá
-        render (bool): Hiển thị quá trình đánh giá
-        seed (int, optional): Hạt giống cho tính nhất quán
-    
-    Returns:
-        Dict[str, float]: Kết quả đánh giá
-    """
-    height, width = maze_size
-    
-    # Tạo bộ sinh mê cung và môi trường mới để đánh giá
-    maze_generator = DFSMazeGenerator(height=height, width=width, seed=seed)
-    env = MazeEnvironment(maze_generator=maze_generator)
-    
-    # Tắt thăm dò trong quá trình đánh giá
-    original_epsilon = agent.epsilon
-    agent.epsilon = 0.0
-    
-    # Các biến theo dõi
-    rewards = []
-    steps = []
-    success_count = 0
-    
-    for episode in range(1, num_episodes + 1):
-        state = env.reset()
-        episode_reward = 0
-        step = 0
-        done = False
+        # Cập nhật trạng thái và phần thưởng
+        state = next_state
+        total_reward += reward
+        steps += 1
         
-        if render:
-            print(f"\nEpisode đánh giá {episode}:")
+        # Hiển thị môi trường nếu cần
+        if args.render and steps % 5 == 0:  # Hiển thị mỗi 5 bước
             env.render(mode='console')
-        
-        while not done:
-            action = agent.choose_action(state)
-            next_state, reward, done, info = env.step(action)
-            
-            state = next_state
-            episode_reward += reward
-            step += 1
-            
-            if render:
-                env.render(mode='console')
-                print(f"Bước {step}: Hành động={info['action']}, "
-                      f"Phần thưởng={reward:.1f}, Tổng phần thưởng={episode_reward:.1f}")
-                time.sleep(0.1)
-        
-        # Cập nhật thống kê
-        rewards.append(episode_reward)
-        steps.append(step)
-        if info["status"] == "reached_goal":
-            success_count += 1
+            print(f"Bước: {steps}, Phần thưởng: {reward:.2f}, Tổng phần thưởng: {total_reward:.2f}")
+            time.sleep(0.1)  # Chờ để có thể xem
     
-    # Khôi phục epsilon
-    agent.epsilon = original_epsilon
+    # Hiển thị kết quả kiểm tra
+    print(f"\nKết quả kiểm tra:")
+    print(f"Số bước: {steps}")
+    print(f"Tổng phần thưởng: {total_reward:.2f}")
+    print(f"Trạng thái hoàn thành: {'Đạt đích' if done and steps < MAX_STEPS else 'Không đạt'}")
     
-    # Tính toán kết quả
-    avg_reward = np.mean(rewards)
-    avg_steps = np.mean(steps)
-    success_rate = success_count / num_episodes
+    # So sánh với đường đi ngắn nhất (nếu có)
+    shortest_path = env.get_shortest_path()
+    if shortest_path:
+        print(f"Độ dài đường đi ngắn nhất: {len(shortest_path) - 1}")
+        print(f"Hiệu suất agent: {(len(shortest_path) - 1) / steps:.2%}")
     
-    results = {
-        "avg_reward": avg_reward,
-        "avg_steps": avg_steps,
-        "success_rate": success_rate,
-        "num_episodes": num_episodes
-    }
-    
-    print(f"\nKết quả đánh giá trên mê cung {height}x{width}:")
-    print(f"Phần thưởng trung bình: {avg_reward:.1f}")
-    print(f"Số bước trung bình: {avg_steps:.1f}")
-    print(f"Tỷ lệ thành công: {success_rate:.2f} ({success_count}/{num_episodes})")
-    
-    return results
-
-def plot_training_data(training_history: Dict[str, List[float]], 
-                      title_prefix: str = "", save_path: Optional[str] = None) -> None:
-    """
-    Vẽ biểu đồ tiến trình huấn luyện.
-    
-    Args:
-        training_history (Dict[str, List[float]]): Lịch sử huấn luyện
-        title_prefix (str): Tiền tố cho tiêu đề biểu đồ
-        save_path (str, optional): Đường dẫn để lưu biểu đồ
-    """
-    plt.figure(figsize=(15, 10))
-    
-    # Biểu đồ phần thưởng
-    plt.subplot(2, 2, 1)
-    plt.plot(training_history["episode_rewards"])
-    plt.title(f"{title_prefix} Phần thưởng theo episode")
-    plt.xlabel("Episode")
-    plt.ylabel("Tổng phần thưởng")
-    plt.grid(True)
-    
-    # Biểu đồ số bước
-    plt.subplot(2, 2, 2)
-    plt.plot(training_history["episode_steps"])
-    plt.title(f"{title_prefix} Số bước theo episode")
-    plt.xlabel("Episode")
-    plt.ylabel("Số bước")
-    plt.grid(True)
-    
-    # Biểu đồ tỷ lệ thành công
-    plt.subplot(2, 2, 3)
-    plt.plot(training_history["success_rate"])
-    plt.title(f"{title_prefix} Tỷ lệ thành công (cửa sổ trượt)")
-    plt.xlabel("Episode")
-    plt.ylabel("Tỷ lệ thành công")
-    plt.grid(True)
-    
-    # Biểu đồ epsilon
-    plt.subplot(2, 2, 4)
-    plt.plot(training_history["epsilon_values"])
-    plt.title(f"{title_prefix} Tỷ lệ thăm dò (epsilon)")
-    plt.xlabel("Episode")
-    plt.ylabel("Epsilon")
-    plt.grid(True)
-    
-    plt.tight_layout()
-    
-    if save_path:
-        plt.savefig(save_path)
-    
-    plt.show()
+    print("\nQuá trình huấn luyện và kiểm tra hoàn tất!")
 
 if __name__ == "__main__":
-    # Tạo thư mục để lưu mô hình
-    models_dir = "backend/models"
-    os.makedirs(models_dir, exist_ok=True)
-    
-    # Các tham số huấn luyện
-    maze_size = (10, 10)  # Kích thước mê cung
-    agent_type = "q_learning"  # Loại agent: "q_learning" hoặc "sarsa"
-    num_episodes = 1000  # Số episode huấn luyện
-    seed = 42  # Hạt giống
-    
-    # Đường dẫn lưu mô hình
-    save_dir = os.path.join(models_dir, agent_type)
-    
-    # Huấn luyện agent
-    training_history, agent = train_agent(
-        maze_size=maze_size,
-        agent_type=agent_type,
-        num_episodes=num_episodes,
-        save_path=save_dir,
-        save_interval=200,  # Lưu mô hình sau mỗi 200 episode
-        render_interval=0,  # 0 để tắt hiển thị, >0 để hiển thị mỗi n episode
-        verbose=True,
-        seed=seed
-    )
-    
-    # Vẽ biểu đồ tiến trình huấn luyện
-    plot_training_data(
-        training_history,
-        title_prefix=f"{agent_type.upper()} trên mê cung {maze_size[0]}x{maze_size[1]} - ",
-        save_path=os.path.join(save_dir, f"{agent_type}_training_progress_{maze_size[0]}x{maze_size[1]}.png")
-    )
-    
-    # Đánh giá agent sau khi huấn luyện
-    evaluation_results = evaluate_agent(
-        agent=agent,
-        maze_size=maze_size,
-        num_episodes=100,
-        render=False,  # True để hiển thị quá trình đánh giá
-        seed=seed+1  # Seed khác để đánh giá trên mê cung mới
-    )
+    main()
