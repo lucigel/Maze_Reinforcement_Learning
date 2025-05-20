@@ -11,8 +11,6 @@ class MazeEnvironment:
     Môi trường này tuân theo giao diện tương tự như OpenAI Gym, với các phương thức
     reset(), step() và render() để agent có thể tương tác.
     """
-    
-    # Định nghĩa các hằng số
     PATH = BaseMazeGenerator.PATH
     WALL = BaseMazeGenerator.WALL
     START = BaseMazeGenerator.START
@@ -83,7 +81,6 @@ class MazeEnvironment:
             self.start_pos = maze_generator.start_pos
             self.goal_pos = maze_generator.goal_pos
         
-        # Không có mê cung và không có bộ sinh
         else:
             raise ValueError("Phải cung cấp ma trận mê cung hoặc bộ sinh mê cung")
         
@@ -110,23 +107,12 @@ class MazeEnvironment:
     
 
     def step(self, action: int) -> Tuple[Tuple[int, int], float, bool, Dict[str, Any]]:
-        """
-        Thực hiện một bước trong môi trường với phần thưởng thông minh hơn.
-        
-        Args:
-            action (int): Hành động (0: lên, 1: xuống, 2: trái, 3: phải)
-
-        Returns:
-            Tuple[Tuple[int, int], float, bool, Dict[str, Any]]: Tuple gồm (trạng thái mới,
-                                                            phần thưởng, done, thông tin)
-        """
-        # Tăng số bước
         self.steps_count += 1
         
-        # Tính khoảng cách Manhattan hiện tại đến đích
-        current_distance = abs(self.current_pos[0] - self.goal_pos[0]) + abs(self.current_pos[1] - self.goal_pos[1])
+        # Lưu vị trí trước khi di chuyển để tính phần thưởng dựa trên tiến độ
+        prev_pos = self.current_pos
+        prev_dist_to_goal = self._manhattan_distance(prev_pos, self.goal_pos)
         
-        # Tính toán vị trí mới
         dx, dy = self.ACTIONS[action]
         new_row = self.current_pos[0] + dx
         new_col = self.current_pos[1] + dy
@@ -134,46 +120,47 @@ class MazeEnvironment:
         
         # Kiểm tra nếu vị trí mới hợp lệ
         if not self._is_valid_pos(new_row, new_col):
-            # Không di chuyển và bị phạt nếu cố gắng đi vào tường
             reward = self.wall_penalty
             info = {"status": "hit_wall", "action": self.ACTION_NAMES[action]}
-            new_distance = current_distance  # Không đổi khoảng cách vì không di chuyển
         else:
-            # Di chuyển đến vị trí mới
             self.current_pos = new_pos
             
-            # Tính khoảng cách mới đến đích
-            new_distance = abs(self.current_pos[0] - self.goal_pos[0]) + abs(self.current_pos[1] - self.goal_pos[1])
-            
-            # Kiểm tra nếu đến đích
             if self.current_pos == self.goal_pos:
                 reward = self.goal_reward
                 self.done = True
                 info = {"status": "reached_goal", "action": self.ACTION_NAMES[action]}
             else:
-                # Phần thưởng cho mỗi bước di chuyển + phạt theo thời gian + phần thưởng khoảng cách
-                distance_reward = (current_distance - new_distance) * 2.0  # Thưởng gấp đôi cho việc tiến gần đích
+                # Phần thưởng cơ bản cho mỗi bước di chuyển
+                reward = self.move_reward
                 
-                # Phần thưởng cho việc khám phá các ô mới
-                # (Giả sử chúng ta có thể theo dõi các ô đã ghé thăm)
-                exploration_reward = 0.5 if hasattr(self, 'visited_cells') and self.current_pos not in self.visited_cells else 0
+                # Phần thưởng dựa trên tiến độ hướng tới mục tiêu
+                current_dist_to_goal = self._manhattan_distance(self.current_pos, self.goal_pos)
+                progress_reward = prev_dist_to_goal - current_dist_to_goal
                 
-                # Cập nhật ô đã ghé thăm nếu có
+                # Thưởng cho tiến gần hơn đến mục tiêu, phạt cho xa hơn
+                reward += progress_reward * 0.5
+                
+                # Phần thưởng nhỏ cho việc khám phá các ô mới
+                if hasattr(self, 'visited_cells') and self.current_pos not in self.visited_cells:
+                    reward += 0.2
+                
                 if hasattr(self, 'visited_cells'):
                     self.visited_cells.add(self.current_pos)
                 else:
                     self.visited_cells = {self.current_pos}
                     
-                reward = self.move_reward + distance_reward + exploration_reward + (self.steps_count * self.time_penalty)
-                info = {"status": "moving", "action": self.ACTION_NAMES[action], "distance_change": current_distance - new_distance}
+                info = {"status": "moving", "action": self.ACTION_NAMES[action]}
         
-        # Kiểm tra nếu đã vượt quá số bước tối đa
         if self.steps_count >= self.max_steps and not self.done:
             self.done = True
             info["status"] = "max_steps_reached"
         
         return self.current_pos, reward, self.done, info
-    
+
+    def _manhattan_distance(self, pos1, pos2):
+        """Tính khoảng cách Manhattan giữa hai vị trí"""
+        return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
+        
     def _is_valid_pos(self, row: int, col: int) -> bool:
         """
         Kiểm tra nếu vị trí (row, col) là hợp lệ (không phải tường và nằm trong mê cung).

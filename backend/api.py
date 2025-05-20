@@ -186,7 +186,6 @@ async def get_models_info():
             "q_learning": [],
             "sarsa": []
         }
-        
         # Lấy thông tin mô hình Q-Learning
         q_learning_dir = os.path.join(MODEL_DIR, "q_learning")
         if os.path.exists(q_learning_dir):

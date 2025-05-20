@@ -15,7 +15,7 @@ from maze_generators.dfs_generator import DFSMazeGenerator
 from maze_generators.prim_generator import PrimMazeGenerator
 from maze_generators.wilson_generator import WilsonMazeGenerator
 from utils.data_handler import load_model, save_training_history, load_training_history
-from utils.visualization import visualize_maze, visualize_training_history, visualize_heatmap
+from utils.visualization import visualize_maze, visualize_training_results, visualize_heatmap, visualize_maze_with_path
 
 
 def parse_arguments():
@@ -220,8 +220,9 @@ def visualize_results(env: MazeEnvironment, agent: Any, results: Dict[str, Any],
     maze_array = env.maze.copy()
     plt.imshow(maze_array, cmap='binary')
     plt.title('Maze Structure')
-    plt.colorbar(ticks=[0, 1, 2, 3], labels=['Path', 'Wall', 'Start', 'Goal'])
-    
+    cbar = plt.colorbar(ticks=[0, 1, 2, 3])
+    cbar.set_ticklabels(['Path', 'Wall', 'Start', 'Goal'])
+        
     # Vẽ heatmap giá trị Q
     plt.subplot(2, 2, 2)
     plt.imshow(value_function, cmap='hot')

@@ -1,62 +1,240 @@
-# sarsa.py
+# dqn_agent.py (Enhanced Version)
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+import random
 from typing import Tuple, List, Dict, Any, Optional
-from rl_agents.base_agent import BaseAgent
+from rl_agents.base_agent import BaseAgent  
+from collections import deque, namedtuple
 
-class SARSAAgent(BaseAgent):
+
+Experience = namedtuple('Experience', ('state', 'action', 'reward', 'next_state', 'done'))
+
+class DQNetwork(nn.Module):
     """
-    Triển khai thuật toán SARSA cho bài toán mê cung với các cải tiến.
+    Mạng neural cải tiến dùng cho Deep Q-Network.
     
-    SARSA (State-Action-Reward-State-Action) là thuật toán học tăng cường on-policy,
-    học từ những trải nghiệm trực tiếp liên quan đến chính sách hiện tại của agent.
+    Sử dụng mạng neural với nhiều lớp hơn và layer normalization để cải thiện
+    tốc độ học và ổn định hội tụ.
+    """
+    
+    def __init__(self, state_dim: int, action_size: int, hidden_size: int = 128):
+        """
+        Khởi tạo mạng DQN cải tiến.
+        
+        Args:
+            state_dim (int): Số chiều của vector trạng thái đầu vào
+            action_size (int): Số lượng hành động có thể thực hiện
+            hidden_size (int): Kích thước của các lớp ẩn
+        """
+        super(DQNetwork, self).__init__()
+        
+        self.fc1 = nn.Linear(state_dim, hidden_size)
+        self.ln1 = nn.LayerNorm(hidden_size)  # Layer normalization cho ổn định
+        
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.ln2 = nn.LayerNorm(hidden_size)
+        
+        self.fc3 = nn.Linear(hidden_size, hidden_size // 2)
+        self.ln3 = nn.LayerNorm(hidden_size // 2)
+        
+        self.fc4 = nn.Linear(hidden_size // 2, action_size)
+        
+        # Khởi tạo trọng số theo cách giúp đẩy nhanh quá trình hội tụ
+        self._init_weights()
+    
+    def _init_weights(self):
+        """Khởi tạo trọng số để cải thiện tốc độ học"""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                # Kaiming Initialization phù hợp với ReLU
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                # Khởi tạo bias nhỏ dương
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.1)
+    
+    def forward(self, x):
+        """
+        Chuyển tiếp qua mạng neural.
+        
+        Args:
+            x (torch.Tensor): Tensor đầu vào biểu diễn trạng thái
+            
+        Returns:
+            torch.Tensor: Giá trị Q cho mỗi hành động
+        """
+        x = F.relu(self.ln1(self.fc1(x)))
+        x = F.relu(self.ln2(self.fc2(x)))
+        x = F.relu(self.ln3(self.fc3(x)))
+        return self.fc4(x)
+
+class PrioritizedReplayBuffer:
+    """
+    Prioritized Experience Replay cho DQN.
+    Ưu tiên các trải nghiệm có lỗi TD cao để tăng tốc quá trình học.
+    """
+    
+    def __init__(self, capacity, alpha=0.6, beta_start=0.4, beta_frames=100000):
+        """
+        Khởi tạo Prioritized Replay Buffer.
+        
+        Args:
+            capacity (int): Kích thước tối đa của buffer
+            alpha (float): Hệ số quyết định mức độ ưu tiên dựa trên TD error
+            beta_start (float): Hệ số ban đầu để giảm thiểu bias trong sampling
+            beta_frames (int): Số frame để tăng beta từ beta_start đến 1
+        """
+        self.capacity = capacity
+        self.alpha = alpha
+        self.beta_start = beta_start
+        self.beta_frames = beta_frames
+        self.buffer = []
+        self.pos = 0
+        self.priorities = np.zeros((capacity,), dtype=np.float32)
+        self.frame = 1  # Để tính beta
+    
+    def beta(self):
+        """Tính beta dựa trên frame hiện tại"""
+        return min(1.0, self.beta_start + (1.0 - self.beta_start) * self.frame / self.beta_frames)
+    
+    def push(self, *args):
+        """Thêm trải nghiệm vào buffer với ưu tiên cao nhất"""
+        max_prio = self.priorities.max() if self.buffer else 1.0
+        
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(Experience(*args))
+        else:
+            self.buffer[self.pos] = Experience(*args)
+        
+        self.priorities[self.pos] = max_prio
+        self.pos = (self.pos + 1) % self.capacity
+    
+    def sample(self, batch_size):
+        """Lấy mẫu dựa trên ưu tiên"""
+        if len(self.buffer) == self.capacity:
+            prios = self.priorities
+        else:
+            prios = self.priorities[:self.pos]
+        
+        # Tính xác suất lấy mẫu dựa trên ưu tiên
+        probs = prios ** self.alpha
+        probs /= probs.sum()
+        
+        # Lấy mẫu theo xác suất
+        indices = np.random.choice(len(self.buffer), batch_size, p=probs)
+        samples = [self.buffer[idx] for idx in indices]
+        
+        # Tính importance-sampling weights
+        weights = (len(self.buffer) * probs[indices]) ** (-self.beta())
+        weights /= weights.max()
+        weights = torch.tensor(weights, dtype=torch.float32)
+        
+        self.frame += 1
+        
+        return samples, indices, weights
+    
+    def update_priorities(self, indices, priorities):
+        """Cập nhật ưu tiên dựa trên TD errors mới"""
+        for idx, priority in zip(indices, priorities):
+            self.priorities[idx] = priority
+    
+    def __len__(self):
+        return len(self.buffer)
+
+class DQNAgent(BaseAgent):
+    """
+    Triển khai thuật toán Deep Q-Network (DQN) được cải tiến cho bài toán mê cung.
+    
+    Cải tiến bao gồm:
+    - Double DQN: sử dụng 2 mạng để giảm overestimation bias
+    - Prioritized Experience Replay: ưu tiên học từ trải nghiệm quan trọng
+    - N-step returns: học từ phần thưởng nhiều bước
+    - Adaptive exploration: điều chỉnh exploration dựa trên hiệu suất
     """
     
     def __init__(self, state_size: Tuple[int, int], action_size: int = 4, 
-                 learning_rate: float = 0.2, discount_factor: float = 0.99, 
-                 exploration_rate: float = 1.0, exploration_decay: float = 0.98,
+                 learning_rate: float = 0.001, discount_factor: float = 0.99, 
+                 exploration_rate: float = 1.0, exploration_decay: float = 0.995,
                  min_exploration_rate: float = 0.05, seed: Optional[int] = None,
-                 use_expected_sarsa: bool = True):
+                 buffer_size: int = 100000, batch_size: int = 64,
+                 target_update_freq: int = 500, hidden_size: int = 256,
+                 device: str = "cuda" if torch.cuda.is_available() else "cpu",
+                 double_dqn: bool = True, n_step: int = 3,
+                 prioritized_replay: bool = True, alpha: float = 0.6,
+                 beta_start: float = 0.4):
         """
-        Khởi tạo agent SARSA với các cải tiến.
+        Khởi tạo agent DQN cải tiến.
         
         Args:
             state_size (Tuple[int, int]): Kích thước không gian trạng thái (height, width)
             action_size (int): Số lượng hành động có thể thực hiện
-            learning_rate (float): Tốc độ học (alpha)
+            learning_rate (float): Tốc độ học cho optimizer
             discount_factor (float): Hệ số giảm (gamma)
             exploration_rate (float): Tỷ lệ khám phá ban đầu (epsilon)
             exploration_decay (float): Tốc độ giảm tỷ lệ khám phá
             min_exploration_rate (float): Giá trị nhỏ nhất của tỷ lệ khám phá
             seed (int, optional): Hạt giống cho bộ sinh số ngẫu nhiên
-            use_expected_sarsa (bool): Sử dụng Expected SARSA thay vì SARSA thông thường
+            buffer_size (int): Kích thước buffer cho experience replay
+            batch_size (int): Kích thước batch cho việc học
+            target_update_freq (int): Tần suất cập nhật mạng target (tính theo steps)
+            hidden_size (int): Kích thước của các lớp ẩn trong mạng neural
+            device (str): Thiết bị sử dụng cho Pytorch (cuda hoặc cpu)
+            double_dqn (bool): Sử dụng Double DQN thay vì DQN thông thường
+            n_step (int): Số bước cho n-step returns
+            prioritized_replay (bool): Sử dụng Prioritized Experience Replay
+            alpha (float): Hệ số ưu tiên trong PER
+            beta_start (float): Giá trị beta ban đầu trong PER
         """
         super().__init__(state_size, action_size, learning_rate, discount_factor,
-                       exploration_rate, exploration_decay, min_exploration_rate, seed)
+                       exploration_rate, exploration_decay, min_exploration_rate, seed, buffer_size)
         
-        # Khởi tạo Q-table với giá trị lạc quan (optimistic) giúp khuyến khích khám phá ban đầu
-        height, width = state_size
-        self.q_table = np.ones((height, width, action_size)) * 0.1
+        # Thiết lập cho PyTorch
+        self.device = torch.device(device)
+        if seed is not None:
+            torch.manual_seed(seed)
+            random.seed(seed)
+            np.random.seed(seed)
         
-        # Các bảng thống kê bổ sung
-        self.state_visits = np.zeros(state_size)  # Theo dõi số lần thăm mỗi trạng thái
-        self.action_counts = np.zeros((state_size[0], state_size[1], action_size))  # Số lần thực hiện mỗi hành động
-        self.state_action_counts = np.zeros((state_size[0], state_size[1], action_size))  # Số lần thực hiện cặp (s,a)
+        # Kích thước đầu vào state cho mạng neural
+        self.state_dim = state_size[0] * state_size[1] + 2  # Thêm 2 chiều cho biểu diễn vị trí đích
         
-        # Tham số cho Expected SARSA
-        self.use_expected_sarsa = use_expected_sarsa
+        # Tham số học
+        self.batch_size = batch_size
+        self.double_dqn = double_dqn
+        self.n_step = n_step
+        self.use_prioritized_replay = prioritized_replay
         
-        # Lưu trữ các trạng thái gần đây để phát hiện vòng lặp
-        self.recent_states = []  # Lưu các trạng thái gần đây
-        self.max_recent_states = 10  # Số lượng trạng thái gần đây tối đa để lưu
+        # Tạo mạng neural
+        self.policy_net = DQNetwork(self.state_dim, action_size, hidden_size).to(self.device)
+        self.target_net = DQNetwork(self.state_dim, action_size, hidden_size).to(self.device)
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.target_net.eval()  # Target network chỉ dùng để dự đoán
         
-        # Biến theo dõi cho thống kê huấn luyện
-        self.episode_success = []  # Theo dõi episode thành công (đạt đích)
-        self.td_errors = []  # Lưu TD errors cho prioritized replay
+        # Optimizer với learning rate decay
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=learning_rate)
+        self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=1000, gamma=0.95)
         
-        # Cài đặt Exploration/Exploitation
-        self.ucb_c = 0.5  # Hệ số cho Upper Confidence Bound
-        self.use_intrinsic_reward = True  # Sử dụng phần thưởng nội tại để khuyến khích khám phá
-        self.intrinsic_reward_scale = 0.2  # Hệ số cho phần thưởng nội tại
+        # Replay memory
+        if self.use_prioritized_replay:
+            self.memory = PrioritizedReplayBuffer(buffer_size, alpha, beta_start)
+        else:
+            self.memory = deque(maxlen=buffer_size)
+        
+        # N-step returns
+        self.n_step_buffer = deque(maxlen=n_step)
+        
+        # Theo dõi số bước học
+        self.steps_done = 0
+        self.target_update_freq = target_update_freq
+        
+        # Thống kê phụ
+        self.loss_history = []
+        self.episode_success = []
+        
+        # Lưu thông tin goal position nếu có
+        self.goal_pos = None
     
     def choose_action(self, state: Tuple[int, int]) -> int:
         """
@@ -72,7 +250,7 @@ class SARSAAgent(BaseAgent):
         self.state_visits[state] += 1
         row, col = state
         
-        # Chiến lược 1: Khai thác với xác suất (1 - epsilon)
+        # Chiến lược 1: Khai thác (exploitation) với xác suất (1 - epsilon)
         if self.rng.random() > self.epsilon:
             # Khai thác: chọn hành động tốt nhất dựa trên Q-table
             q_values = self.q_table[row, col]
@@ -139,7 +317,26 @@ class SARSAAgent(BaseAgent):
             if avoid_actions:
                 return self.rng.choice(avoid_actions)
         
-        # Chiến lược 5: Khám phá ngẫu nhiên đơn thuần
+        # Chiến lược 5: Upper Confidence Bound (UCB) khám phá
+        if self.rng.random() < 0.4:
+            ucb_values = np.zeros(self.action_size)
+            total_visits = max(1, np.sum(self.state_action_counts[row, col]))
+            
+            for a in range(self.action_size):
+                # Tránh hành động không hợp lệ
+                if a not in valid_actions:
+                    ucb_values[a] = float('-inf')
+                    continue
+                
+                # Tính confidence bound
+                action_visits = max(1, self.state_action_counts[row, col, a])
+                exploration_bonus = self.ucb_c * np.sqrt(np.log(total_visits) / action_visits)
+                ucb_values[a] = self.q_table[row, col, a] + exploration_bonus
+            
+            # Chọn hành động có UCB cao nhất
+            return np.argmax(ucb_values)
+        
+        # Chiến lược 6: Khám phá ngẫu nhiên đơn thuần
         if valid_actions:
             return self.rng.choice(valid_actions)
         else:
@@ -149,7 +346,7 @@ class SARSAAgent(BaseAgent):
               reward: float, next_state: Tuple[int, int], 
               done: bool, next_action: Optional[int] = None) -> None:
         """
-        Cập nhật Q-table sử dụng thuật toán SARSA với các cải tiến.
+        Cập nhật Q-table sử dụng thuật toán Q-Learning cải tiến.
         
         Args:
             state (Tuple[int, int]): Trạng thái hiện tại
@@ -157,7 +354,7 @@ class SARSAAgent(BaseAgent):
             reward (float): Phần thưởng nhận được
             next_state (Tuple[int, int]): Trạng thái tiếp theo
             done (bool): True nếu episode kết thúc
-            next_action (int, optional): Hành động tiếp theo
+            next_action (int, optional): Không sử dụng trong Q-Learning
         """
         # Cập nhật danh sách trạng thái gần đây
         self.recent_states.append(state)
@@ -171,12 +368,15 @@ class SARSAAgent(BaseAgent):
         if self.use_intrinsic_reward:
             # Phần thưởng cho sự mới lạ (novelty)
             visit_count = self.state_visits[next_state]
-            novelty_reward = 1.0 / (visit_count + 1)
+            if visit_count == 0:  # Trạng thái chưa từng thăm
+                novelty_reward = 2.0  # Thưởng lớn cho trạng thái hoàn toàn mới
+            else:
+                novelty_reward = 1.0 / visit_count
             
             # Phạt nếu quay lại trạng thái gần đây (tránh lặp)
             loop_penalty = 0
-            if next_state in self.recent_states[-5:]:  # Kiểm tra 5 trạng thái gần nhất
-                loop_penalty = -0.2
+            if next_state in self.recent_states[-3:]:  # Kiểm tra 3 trạng thái gần nhất
+                loop_penalty = -0.3
             
             # Thêm vào phần thưởng tổng
             total_reward += self.intrinsic_reward_scale * (novelty_reward + loop_penalty)
@@ -188,28 +388,29 @@ class SARSAAgent(BaseAgent):
         # Lấy giá trị Q hiện tại cho cặp (state, action)
         current_q = self.q_table[state[0], state[1], action]
         
-        # Tính toán TD target
+        # Tính toán giá trị Q mới
         if done:
-            # Nếu đã kết thúc episode, không có giá trị tiếp theo
-            td_target = total_reward
+            # Nếu đã kết thúc episode, không có trạng thái tiếp theo
+            target_q = total_reward
         else:
-            if self.use_expected_sarsa:
-                # Expected SARSA: tính giá trị kỳ vọng của Q(s', a')
-                td_target = self._calculate_expected_sarsa_target(total_reward, next_state)
+            if self.use_double_q:
+                # Double Q-Learning: Chọn action từ Q chính, nhưng lấy giá trị từ Q target
+                best_action = np.argmax(self.q_table[next_state[0], next_state[1]])
+                max_next_q = self.target_q_table[next_state[0], next_state[1], best_action]
             else:
-                # SARSA thông thường
-                if next_action is None:
-                    next_action = self.choose_action(next_state)
-                
-                td_target = total_reward + self.gamma * self.q_table[next_state[0], next_state[1], next_action]
+                # Q-Learning tiêu chuẩn
+                max_next_q = np.max(self.q_table[next_state[0], next_state[1]])
+            
+            # Công thức Q-Learning
+            target_q = total_reward + self.gamma * max_next_q
         
         # Tính TD error
-        td_error = td_target - current_q
+        td_error = target_q - current_q
         
         # Tốc độ học thích ứng (giảm khi trạng thái được thăm nhiều lần)
         adaptive_lr = max(0.05, self.lr / (1 + 0.05 * self.state_visits[state]))
         
-        # Cập nhật giá trị Q
+        # Cập nhật Q-table
         self.q_table[state[0], state[1], action] += adaptive_lr * td_error
         
         # Lưu TD error cho prioritized replay
@@ -217,36 +418,14 @@ class SARSAAgent(BaseAgent):
         if len(self.td_errors) > 10000:
             self.td_errors = self.td_errors[-10000:]  # Giữ độ dài buffer ở mức hợp lý
         
+        # Cập nhật target network nếu sử dụng Double Q-Learning
+        if self.use_double_q:
+            self.steps += 1
+            if self.steps % self.update_target_steps == 0:
+                self.target_q_table = self.q_table.copy()
+        
         # Lưu trải nghiệm vào buffer
         self.add_experience((state, action, reward, next_state, done))
-    
-    def _calculate_expected_sarsa_target(self, reward: float, next_state: Tuple[int, int]) -> float:
-        """
-        Tính TD target cho Expected SARSA.
-        
-        Args:
-            reward (float): Phần thưởng nhận được
-            next_state (Tuple[int, int]): Trạng thái tiếp theo
-            
-        Returns:
-            float: Expected SARSA target
-        """
-        q_values = self.q_table[next_state[0], next_state[1]]
-        max_action = np.argmax(q_values)
-        
-        # Tính xác suất chọn mỗi hành động theo chính sách epsilon-greedy
-        greedy_prob = 1 - self.epsilon + self.epsilon / self.action_size
-        non_greedy_prob = self.epsilon / self.action_size
-        
-        # Tính giá trị kỳ vọng
-        expected_q = 0
-        for a in range(self.action_size):
-            if a == max_action:
-                expected_q += greedy_prob * q_values[a]
-            else:
-                expected_q += non_greedy_prob * q_values[a]
-        
-        return reward + self.gamma * expected_q
     
     def prioritized_replay(self, batch_size: int = 32) -> None:
         """
@@ -284,13 +463,13 @@ class SARSAAgent(BaseAgent):
             # Điều chỉnh epsilon dựa trên hiệu suất
             if recent_success > 0.7:
                 # Hiệu suất tốt, giảm epsilon nhanh hơn
-                self.epsilon = max(self.min_epsilon, self.epsilon * 0.9)
+                self.epsilon = max(self.min_epsilon, self.epsilon * 0.8)
             elif recent_success > 0.3:
                 # Hiệu suất trung bình, giảm epsilon bình thường
-                self.epsilon = max(self.min_epsilon, self.epsilon * 0.95)
+                self.epsilon = max(self.min_epsilon, self.epsilon * 0.9)
             else:
                 # Hiệu suất kém, giảm epsilon chậm hơn
-                self.epsilon = max(self.min_epsilon, self.epsilon * 0.98)
+                self.epsilon = max(self.min_epsilon, self.epsilon * 0.95)
         else:
             # Chưa đủ dữ liệu, sử dụng decay mặc định
             self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
@@ -299,7 +478,7 @@ class SARSAAgent(BaseAgent):
               verbose: bool = True, save_path: Optional[str] = None,
               save_interval: int = 100, replay_batch_size: int = 32) -> Dict[str, List]:
         """
-        Huấn luyện agent sử dụng thuật toán SARSA cải tiến.
+        Huấn luyện agent sử dụng thuật toán Q-Learning cải tiến.
         
         Args:
             env: Môi trường mê cung
@@ -330,16 +509,16 @@ class SARSAAgent(BaseAgent):
             episode_reward = 0
             step = 0
             
-            # Chọn hành động đầu tiên
-            action = self.choose_action(state)
-            
             # Đếm số trạng thái đã thăm trong episode này
             visited_states = set()
             stuck_counter = 0  # Đếm số bước bị kẹt
             
             while step < max_steps:
+                # Chọn hành động
+                action = self.choose_action(state)
+                
                 # Thực hiện hành động
-                next_state, reward, done, _ = env.step(action)
+                next_state, reward, done, info = env.step(action)
                 
                 # Theo dõi trạng thái đã thăm để phát hiện bị kẹt
                 state_key = (next_state[0], next_state[1])
@@ -350,23 +529,22 @@ class SARSAAgent(BaseAgent):
                     stuck_counter = 0
                 
                 # Nếu agent bị kẹt quá lâu, tăng epsilon tạm thời để thúc đẩy khám phá
-                if stuck_counter > 50:
-                    self.epsilon = min(1.0, self.epsilon * 1.5)
+                if stuck_counter > 30:  # Ngưỡng thấp hơn để phản ứng nhanh hơn
+                    self.epsilon = min(1.0, self.epsilon * 2)
+                    # Xóa một phần experience buffer để quên đi các trải nghiệm không tốt
+                    if len(self.experience_buffer) > 100:
+                        self.experience_buffer = self.experience_buffer[-100:]
                     stuck_counter = 0
                 
-                # Chọn hành động tiếp theo (cần thiết cho SARSA)
-                next_action = self.choose_action(next_state) if not done else None
-                
                 # Học từ trải nghiệm
-                self.learn(state, action, reward, next_state, done, next_action)
+                self.learn(state, action, reward, next_state, done)
                 
                 # Experience replay mỗi 5 bước
                 if step % 5 == 0 and len(self.td_errors) > replay_batch_size:
-                    self.prioritized_replay(batch_size=replay_batch_size)
+                    self.prioritized_replay(batch_size=min(replay_batch_size*2, len(self.td_errors)//2))
                 
-                # Cập nhật trạng thái và hành động
+                # Cập nhật trạng thái
                 state = next_state
-                action = next_action if next_action is not None else 0
                 episode_reward += reward
                 step += 1
                 
@@ -395,11 +573,11 @@ class SARSAAgent(BaseAgent):
             
             # Lưu mô hình định kỳ
             if save_path and (episode + 1) % save_interval == 0:
-                self.save_model(f"{save_path}/sarsa_episode_{episode + 1}.pkl")
+                self.save_model(f"{save_path}/q_learning_episode_{episode + 1}.pkl")
         
         # Lưu mô hình cuối cùng
         if save_path:
-            self.save_model(f"{save_path}/sarsa_final.pkl")
+            self.save_model(f"{save_path}/q_learning_final.pkl")
         
         # Trả về kết quả huấn luyện
         return {
