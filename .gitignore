@@ -4,10 +4,8 @@
 
 # Backend temp env
 backend/maze_env/
-backend/models/sarsa/*.pkl
-backend/models/sarsa/*.npz
-backend/models/q_learning/*.pkl
-backend/models/q_learning/*.npz
+backend/models/*
+backend/results/*
 
 
 # Frontend dependencies
