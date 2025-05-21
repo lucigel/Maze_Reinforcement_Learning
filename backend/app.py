@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
@@ -8,17 +10,23 @@ import pickle
 from enviroment.maze_env import MazeEnvironment
 from rl_agents.q_learning import QLearningAgent
 from rl_agents.sarsa import SARSAAgent
+from maze_generators.dfs_generator import DFSMazeGenerator
+from maze_generators.prim_generator import PrimMazeGenerator
+from maze_generators.wilson_generator import WilsonMazeGenerator
 
 app = FastAPI()
 
-# Cấu hình CORS để frontend có thể gọi API
+# Cấu hình CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Cho phép tất cả các origin trong môi trường phát triển
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Phục vụ file tĩnh cho frontend
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Các hằng số cho mê cung
 PATH = 0
@@ -26,7 +34,11 @@ WALL = 1
 START = 2
 GOAL = 3
 
-# Models cho Pydantic
+# Models
+class MazeRequest(BaseModel):
+    size: int
+    generator: str
+
 class MazeData(BaseModel):
     maze: List[List[int]]
     algorithm: str
@@ -44,34 +56,41 @@ MODEL_DIR = "models"
 
 def load_agent(algorithm: str, maze_size: Tuple[int, int]) -> Any:
     """Tải agent đã huấn luyện từ file."""
-    # Xác định đường dẫn file dựa trên thuật toán và kích thước mê cung
     height, width = maze_size
     
-    # Tìm mô hình phù hợp nhất với kích thước mê cung
-    if height <= 10 and width <= 10:
-        size_str = "10x10"
-    elif height <= 15 and width <= 15:
+    # Chọn mô hình phù hợp với kích thước mê cung
+    if height <= 11:
+        size_str = "11x11"
+    elif height <= 15:
         size_str = "15x15"
     else:
-        size_str = "20x20"
+        size_str = "21x21"
+    
+    print(f"Đang tải mô hình {algorithm} cho kích thước {size_str}")
     
     # Xây dựng đường dẫn file
     if algorithm == "q_learning":
         file_path = os.path.join(MODEL_DIR, "q_learning", f"maze_{size_str}.pkl")
         if not os.path.exists(file_path):
+            print(f"Không tìm thấy: {file_path}")
             file_path = os.path.join(MODEL_DIR, "q_learning", "q_learning_final.pkl")
     else:  # SARSA
         file_path = os.path.join(MODEL_DIR, "sarsa", f"maze_{size_str}.pkl")
         if not os.path.exists(file_path):
+            print(f"Không tìm thấy: {file_path}")
             file_path = os.path.join(MODEL_DIR, "sarsa", "sarsa_final.pkl")
     
     # Kiểm tra xem file có tồn tại không
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Không tìm thấy file mô hình cho {algorithm} kích thước {size_str}")
     
+    print(f"Đang tải mô hình từ: {file_path}")
+    
     # Tải mô hình
     with open(file_path, 'rb') as f:
         model_data = pickle.load(f)
+    
+    print(f"Đã tải mô hình. Các khóa: {list(model_data.keys())}")
     
     # Tạo agent và load dữ liệu
     if algorithm == "q_learning":
@@ -83,14 +102,47 @@ def load_agent(algorithm: str, maze_size: Tuple[int, int]) -> Any:
     agent.q_table = model_data['q_table']
     agent.state_size = model_data['state_size']
     agent.action_size = model_data['action_size']
-    agent.epsilon = model_data['epsilon']
-    agent.lr = model_data['lr']
-    agent.gamma = model_data['gamma']
+    agent.epsilon = 0.0  # Đặt epsilon = 0 để agent không khám phá ngẫu nhiên
+    agent.lr = model_data.get('lr', 0.1)
+    agent.gamma = model_data.get('gamma', 0.99)
     
     if 'state_visits' in model_data:
         agent.state_visits = model_data['state_visits']
     
     return agent
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Trả về trang chủ (HTML)"""
+    with open("static/index.html", "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content)
+
+@app.post("/api/generate-maze")
+async def generate_maze(request: MazeRequest):
+    """Tạo mê cung mới với kích thước và thuật toán được chỉ định"""
+    size = request.size
+    generator_type = request.generator
+    
+    # Tạo mê cung với bộ sinh phù hợp
+    if generator_type == "dfs":
+        generator = DFSMazeGenerator(width=size, height=size)
+    elif generator_type == "prim":
+        generator = PrimMazeGenerator(width=size, height=size)
+    elif generator_type == "wilson":
+        generator = WilsonMazeGenerator(width=size, height=size)
+    else:
+        raise HTTPException(status_code=400, detail="Thuật toán sinh mê cung không hỗ trợ")
+    
+    maze = generator.generate()
+    start_pos = generator.start_pos
+    goal_pos = generator.goal_pos
+    
+    return {
+        "maze": maze.tolist(),
+        "start_pos": start_pos,
+        "goal_pos": goal_pos
+    }
 
 @app.post("/api/solve-maze")
 async def solve_maze(data: MazeData) -> SolveResponse:
@@ -99,6 +151,8 @@ async def solve_maze(data: MazeData) -> SolveResponse:
         # Chuyển đổi maze từ danh sách 2D thành mảng numpy
         maze_array = np.array(data.maze)
         height, width = maze_array.shape
+        
+        print(f"Kích thước mê cung: {height}x{width}")
         
         # Tìm vị trí bắt đầu và đích nếu không được chỉ định
         start_pos = data.start_pos
@@ -128,6 +182,8 @@ async def solve_maze(data: MazeData) -> SolveResponse:
                 else:
                     raise ValueError("Không tìm thấy vị trí đích trong mê cung")
         
+        print(f"Vị trí bắt đầu: {start_pos}, Vị trí đích: {goal_pos}")
+        
         # Tạo môi trường mê cung
         env = MazeEnvironment(maze=maze_array, start_pos=start_pos, goal_pos=goal_pos)
         
@@ -143,12 +199,20 @@ async def solve_maze(data: MazeData) -> SolveResponse:
         done = False
         steps = 0
         
-        while not done and steps < 1000:  # Giới hạn tối đa 1000 bước
+        # Giới hạn số bước tối đa để tránh chạy quá lâu
+        max_steps = min(1000, height * width * 5)  # Giới hạn hợp lý dựa vào kích thước mê cung
+        
+        print(f"Bắt đầu giải mê cung từ vị trí {state} với tối đa {max_steps} bước")
+        
+        while not done and steps < max_steps:
             # Chọn hành động tối ưu từ Q-table
             action = np.argmax(agent.q_table[state[0], state[1]])
             
             # Thực hiện hành động
             next_state, reward, done, _ = env.step(action)
+            
+            if steps % 10 == 0:  # Chỉ in log mỗi 10 bước để giảm lượng log
+                print(f"Bước {steps}: Từ {state} thực hiện hành động {action} đến {next_state}, reward: {reward}, done: {done}")
             
             # Cập nhật biến theo dõi
             state = next_state
@@ -156,9 +220,14 @@ async def solve_maze(data: MazeData) -> SolveResponse:
             total_reward += reward
             steps += 1
             
-            # Thoát nếu đã đến đích hoặc quá số bước tối đa
-            if done or steps >= 1000:
+            # Thoát nếu đã đến đích
+            if done:
+                print(f"Đã đến đích sau {steps} bước!")
                 break
+        
+        # Nếu đã đạt đến số bước tối đa nhưng chưa đến đích
+        if steps >= max_steps and not done:
+            print(f"Đã đạt đến số bước tối đa ({max_steps}) mà chưa đến đích")
         
         # Lấy ma trận giá trị Q
         q_values = {
@@ -168,6 +237,7 @@ async def solve_maze(data: MazeData) -> SolveResponse:
         }
         
         # Trả về kết quả
+        print(f"Kết quả giải: {steps} bước, tổng reward: {total_reward}, đã đến đích: {done}")
         return SolveResponse(
             path=path,
             q_values=q_values,
@@ -176,6 +246,8 @@ async def solve_maze(data: MazeData) -> SolveResponse:
         )
     
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/models-info")
@@ -205,7 +277,19 @@ async def get_models_info():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Thêm để phục vụ HTML
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def serve_index(full_path: str):
+    """Serve index.html for all routes for SPA behavior"""
+    with open("static/index.html", "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content)
+
 # Thêm endpoint để kiểm tra sức khỏe API
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maze Solver - Reinforcement Learning</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 1rem;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            margin: 0;
+            font-size: 2rem;
+        }
+        
+        .main-content {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .maze-container {
+            flex: 1;
+            min-width: 300px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            overflow: auto;
+        }
+        
+        .controls {
+            flex: 0 0 300px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+        
+        .control-group {
+            margin-bottom: 20px;
+        }
+        
+        .control-group h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        
+        .btn {
+            display: inline-block;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 5px 0;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            width: 100%;
+            text-align: center;
+        }
+        
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        
+        .btn-generate {
+            background-color: #2ecc71;
+        }
+        
+        .btn-generate:hover {
+            background-color: #27ae60;
+        }
+        
+        .btn-solve {
+            background-color: #e74c3c;
+        }
+        
+        .btn-solve:hover {
+            background-color: #c0392b;
+        }
+        
+        select, label {
+            display: block;
+            width: 100%;
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        
+        .maze-grid {
+            display: grid;
+            gap: 1px;
+            margin: 0 auto;
+        }
+        
+        .maze-cell {
+            width: 100%;
+            height: 0;
+            padding-bottom: 100%;
+            position: relative;
+        }
+        
+        .wall {
+            background-color: #34495e;
+        }
+        
+        .path {
+            background-color: #ecf0f1;
+        }
+        
+        .start {
+            background-color: #2ecc71;
+        }
+        
+        .goal {
+            background-color: #e74c3c;
+        }
+        
+        .agent {
+            background-color: #3498db;
+        }
+        
+        .results {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100px;
+            font-weight: bold;
+            color: #7f8c8d;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #3498db;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            .controls {
+                order: -1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Maze Solver - Reinforcement Learning</h1>
+    </header>
+    
+    <div class="container">
+        <div class="main-content">
+            <div class="maze-container">
+                <div id="maze-display">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <span>Đang tải...</span>
+                    </div>
+                </div>
+                <div id="results" class="results" style="display: none;">
+                    <h3>Kết quả giải mê cung</h3>
+                    <p>Thuật toán: <span id="result-algorithm"></span></p>
+                    <p>Số bước: <span id="result-steps"></span></p>
+                    <p>Phần thưởng: <span id="result-reward"></span></p>
+                </div>
+            </div>
+            
+            <div class="controls">
+                <div class="control-group">
+                    <h3>Cấu hình mê cung</h3>
+                    <label for="maze-size">Kích thước:</label>
+                    <select id="maze-size">
+                        <option value="11">11 x 11</option>
+                        <option value="15">15 x 15</option>
+                        <option value="21">21 x 21</option>
+                    </select>
+                    
+                    <label for="generator-type">Thuật toán tạo mê cung:</label>
+                    <select id="generator-type">
+                        <option value="dfs">DFS (Depth-First Search)</option>
+                        <option value="prim">Prim's Algorithm</option>
+                        <option value="wilson">Wilson's Algorithm</option>
+                    </select>
+                    
+                    <button id="btn-generate" class="btn btn-generate">Tạo mê cung mới</button>
+                </div>
+                
+                <div class="control-group">
+                    <h3>Giải mê cung</h3>
+                    <label for="solver-type">Thuật toán giải:</label>
+                    <select id="solver-type">
+                        <option value="q_learning">Q-Learning</option>
+                        <option value="sarsa">SARSA</option>
+                    </select>
+                    
+                    <button id="btn-solve" class="btn btn-solve">Giải mê cung</button>
+                </div>
+                
+                <div class="control-group">
+                    <h3>Tùy chọn hiển thị</h3>
+                    <label for="animation-speed">Tốc độ hoạt ảnh:</label>
+                    <select id="animation-speed">
+                        <option value="fast">Nhanh</option>
+                        <option value="medium" selected>Trung bình</option>
+                        <option value="slow">Chậm</option>
+                    </select>
+                    
+                    <label for="show-path">
+                        <input type="checkbox" id="show-path" checked> 
+                        Hiển thị đường đi
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Các biến toàn cục
+        let currentMaze = null;
+        let currentPath = null;
+        let startPos = null;
+        let goalPos = null;
+        let animationInterval = null;
+        let animationIndex = 0;
+        
+        // Khởi tạo khi trang đã tải
+        document.addEventListener('DOMContentLoaded', function() {
+            // Lấy tham chiếu đến các phần tử
+            const btnGenerate = document.getElementById('btn-generate');
+            const btnSolve = document.getElementById('btn-solve');
+            const mazeSize = document.getElementById('maze-size');
+            const generatorType = document.getElementById('generator-type');
+            const solverType = document.getElementById('solver-type');
+            const animationSpeed = document.getElementById('animation-speed');
+            const showPath = document.getElementById('show-path');
+            const mazeDisplay = document.getElementById('maze-display');
+            const resultsDiv = document.getElementById('results');
+            
+            // Thêm sự kiện cho các nút
+            btnGenerate.addEventListener('click', generateMaze);
+            btnSolve.addEventListener('click', solveMaze);
+            
+            // Tạo mê cung mặc định khi tải trang
+            generateMaze();
+            
+            // Hàm tạo mê cung mới
+            async function generateMaze() {
+                try {
+                    // Hiển thị trạng thái đang tải
+                    mazeDisplay.innerHTML = '<div class="loading"><div class="spinner"></div><span>Đang tạo mê cung...</span></div>';
+                    resultsDiv.style.display = 'none';
+                    
+                    // Hủy animation hiện tại nếu có
+                    if (animationInterval) {
+                        clearInterval(animationInterval);
+                        animationInterval = null;
+                    }
+                    
+                    // Gọi API để tạo mê cung
+                    const response = await fetch('/api/generate-maze', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            size: parseInt(mazeSize.value),
+                            generator: generatorType.value
+                        }),
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Lỗi khi tạo mê cung');
+                    }
+                    
+                    const data = await response.json();
+                    currentMaze = data.maze;
+                    startPos = data.start_pos;
+                    goalPos = data.goal_pos;
+                    
+                    // Hiển thị mê cung
+                    renderMaze(currentMaze);
+                } catch (error) {
+                    console.error('Lỗi:', error);
+                    mazeDisplay.innerHTML = `<div class="error">Đã xảy ra lỗi: ${error.message}</div>`;
+                }
+            }
+            
+            // Hàm giải mê cung
+            async function solveMaze() {
+                if (!currentMaze) {
+                    alert('Vui lòng tạo mê cung trước!');
+                    return;
+                }
+                
+                try {
+                    // Hiển thị trạng thái đang tải
+                    resultsDiv.style.display = 'none';
+                    
+                    // Hủy animation hiện tại nếu có
+                    if (animationInterval) {
+                        clearInterval(animationInterval);
+                        animationInterval = null;
+                    }
+                    
+                    // Hiển thị lại mê cung ban đầu (không có đường đi)
+                    renderMaze(currentMaze);
+                    
+                    // Thêm thông báo đang giải
+                    const loadingEl = document.createElement('div');
+                    loadingEl.className = 'loading';
+                    loadingEl.innerHTML = '<div class="spinner"></div><span>Đang giải mê cung...</span>';
+                    mazeDisplay.appendChild(loadingEl);
+                    
+                    // Gọi API để giải mê cung
+                    const response = await fetch('/api/solve-maze', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            maze: currentMaze,
+                            algorithm: solverType.value,
+                            start_pos: startPos,
+                            goal_pos: goalPos
+                        }),
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Lỗi khi giải mê cung');
+                    }
+                    
+                    const data = await response.json();
+                    
+                    // Xóa thông báo đang giải
+                    if (loadingEl.parentNode) {
+                        loadingEl.parentNode.removeChild(loadingEl);
+                    }
+                    
+                    // Lưu đường đi
+                    currentPath = data.path;
+                    
+                    // Hiển thị kết quả
+                    document.getElementById('result-algorithm').textContent = solverType.value === 'q_learning' ? 'Q-Learning' : 'SARSA';
+                    document.getElementById('result-steps').textContent = data.steps;
+                    document.getElementById('result-reward').textContent = data.total_reward.toFixed(2);
+                    resultsDiv.style.display = 'block';
+                    
+                    // Bắt đầu animation đường đi
+                    if (showPath.checked && currentPath && currentPath.length > 0) {
+                        animatePathFinding();
+                    }
+                } catch (error) {
+                    console.error('Lỗi:', error);
+                    resultsDiv.style.display = 'none';
+                    alert(`Đã xảy ra lỗi: ${error.message}`);
+                }
+            }
+            
+            // Hàm hiển thị mê cung
+            function renderMaze(maze) {
+                const size = maze.length;
+                const cellSize = Math.min(
+                    Math.floor((mazeDisplay.clientWidth - 40) / size),
+                    Math.floor((window.innerHeight * 0.6) / size)
+                );
+                
+                // Tạo grid
+                const mazeGrid = document.createElement('div');
+                mazeGrid.className = 'maze-grid';
+                mazeGrid.style.gridTemplateColumns = `repeat(${size}, 1fr)`;
+                
+                // Tạo các ô
+                for (let row = 0; row < size; row++) {
+                    for (let col = 0; col < size; col++) {
+                        const cell = document.createElement('div');
+                        cell.className = 'maze-cell';
+                        cell.id = `cell-${row}-${col}`;
+                        
+                        // Xác định loại ô
+                        if (maze[row][col] === 1) {
+                            cell.classList.add('wall');
+                        } else if (startPos && row === startPos[0] && col === startPos[1]) {
+                            cell.classList.add('start');
+                        } else if (goalPos && row === goalPos[0] && col === goalPos[1]) {
+                            cell.classList.add('goal');
+                        } else {
+                            cell.classList.add('path');
+                        }
+                        
+                        mazeGrid.appendChild(cell);
+                    }
+                }
+                
+                // Xóa nội dung cũ và thêm grid mới
+                mazeDisplay.innerHTML = '';
+                mazeDisplay.appendChild(mazeGrid);
+            }
+            
+            // Hàm hiển thị animation đường đi
+            function animatePathFinding() {
+                // Reset animation
+                animationIndex = 0;
+                
+                // Làm sạch đường đi hiện tại
+                clearPathVisualization();
+                
+                // Tốc độ animation
+                let speed = 50; // ms
+                switch (animationSpeed.value) {
+                    case 'fast':
+                        speed = 20;
+                        break;
+                    case 'medium':
+                        speed = 50;
+                        break;
+                    case 'slow':
+                        speed = 100;
+                        break;
+                }
+                
+                // Bắt đầu animation
+                animationInterval = setInterval(() => {
+                    if (animationIndex < currentPath.length) {
+                        const [row, col] = currentPath[animationIndex];
+                        
+                        // Không đánh dấu điểm bắt đầu và đích
+                        if ((row !== startPos[0] || col !== startPos[1]) && 
+                            (row !== goalPos[0] || col !== goalPos[1])) {
+                            const cell = document.getElementById(`cell-${row}-${col}`);
+                            if (cell) {
+                                cell.classList.add('agent');
+                            }
+                        }
+                        
+                        animationIndex++;
+                    } else {
+                        // Dừng animation khi hoàn thành
+                        clearInterval(animationInterval);
+                        animationInterval = null;
+                    }
+                }, speed);
+            }
+            
+            // Hàm xóa đường đi
+            function clearPathVisualization() {
+                // Xóa tất cả các ô đánh dấu đường đi
+                const agentCells = document.querySelectorAll('.agent');
+                agentCells.forEach(cell => {
+                    cell.classList.remove('agent');
+                });
+            }
+        });
+    </script>
+</body>
+</html>
