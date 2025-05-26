@@ -3,10 +3,7 @@
 **/*.pyc
 
 # Backend temp env
-backend/maze_env/
+backend/venv/*
 backend/models/*
 backend/results/*
 
-
-# Frontend dependencies
-frontend/node_modules/

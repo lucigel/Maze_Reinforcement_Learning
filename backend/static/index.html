@@ -183,6 +183,36 @@
                 order: -1;
             }
         }
+        
+        /* Thêm style cho tooltip */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 250px;
+            background-color: #555;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 8px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -233,7 +263,15 @@
                     <select id="solver-type">
                         <option value="q_learning">Q-Learning</option>
                         <option value="sarsa">SARSA</option>
+                        <option value="dqn">Deep Q-Network (DQN)</option>
                     </select>
+                    <div class="tooltip" id="algorithm-info">ℹ️
+                        <span class="tooltiptext" id="algorithm-tooltip">
+                            Q-Learning: Học dựa trên giá trị Q tối đa tiếp theo.<br>
+                            SARSA: Học dựa trên hành động tiếp theo thực tế.<br>
+                            DQN: Deep Q-Network sử dụng neural network để ước tính hàm Q.
+                        </span>
+                    </div>
                     
                     <button id="btn-solve" class="btn btn-solve">Giải mê cung</button>
                 </div>
@@ -252,6 +290,11 @@
                         Hiển thị đường đi
                     </label>
                 </div>
+                
+                <div class="control-group" id="model-info" style="display: none;">
+                    <h3>Thông tin mô hình</h3>
+                    <div id="model-list"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -264,6 +307,7 @@
         let goalPos = null;
         let animationInterval = null;
         let animationIndex = 0;
+        let modelsInfo = null;
         
         // Khởi tạo khi trang đã tải
         document.addEventListener('DOMContentLoaded', function() {
@@ -277,13 +321,63 @@
             const showPath = document.getElementById('show-path');
             const mazeDisplay = document.getElementById('maze-display');
             const resultsDiv = document.getElementById('results');
+            const modelInfoDiv = document.getElementById('model-info');
+            const modelListDiv = document.getElementById('model-list');
             
             // Thêm sự kiện cho các nút
             btnGenerate.addEventListener('click', generateMaze);
             btnSolve.addEventListener('click', solveMaze);
             
+            // Thêm sự kiện cho select box thuật toán
+            solverType.addEventListener('change', updateAlgorithmInfo);
+            
+            // Lấy thông tin về các mô hình đã huấn luyện
+            fetchModelsInfo();
+            
             // Tạo mê cung mặc định khi tải trang
             generateMaze();
+            
+            // Hàm lấy thông tin mô hình
+            async function fetchModelsInfo() {
+                try {
+                    const response = await fetch('/api/models-info');
+                    
+                    if (!response.ok) {
+                        throw new Error('Lỗi khi lấy thông tin mô hình');
+                    }
+                    
+                    modelsInfo = await response.json();
+                    updateModelInfo();
+                } catch (error) {
+                    console.error('Lỗi:', error);
+                }
+            }
+            
+            // Hàm cập nhật thông tin mô hình
+            function updateModelInfo() {
+                if (!modelsInfo) return;
+                
+                const algorithm = solverType.value;
+                
+                if (modelsInfo[algorithm] && modelsInfo[algorithm].length > 0) {
+                    let html = '<p>Các mô hình có sẵn:</p><ul>';
+                    
+                    modelsInfo[algorithm].forEach(model => {
+                        html += `<li>${model}</li>`;
+                    });
+                    
+                    html += '</ul>';
+                    modelListDiv.innerHTML = html;
+                    modelInfoDiv.style.display = 'block';
+                } else {
+                    modelInfoDiv.style.display = 'none';
+                }
+            }
+            
+            // Hàm cập nhật thông tin thuật toán
+            function updateAlgorithmInfo() {
+                updateModelInfo();
+            }
             
             // Hàm tạo mê cung mới
             async function generateMaze() {
@@ -382,7 +476,7 @@
                     currentPath = data.path;
                     
                     // Hiển thị kết quả
-                    document.getElementById('result-algorithm').textContent = solverType.value === 'q_learning' ? 'Q-Learning' : 'SARSA';
+                    document.getElementById('result-algorithm').textContent = getAlgorithmDisplayName(solverType.value);
                     document.getElementById('result-steps').textContent = data.steps;
                     document.getElementById('result-reward').textContent = data.total_reward.toFixed(2);
                     resultsDiv.style.display = 'block';
@@ -395,6 +489,20 @@
                     console.error('Lỗi:', error);
                     resultsDiv.style.display = 'none';
                     alert(`Đã xảy ra lỗi: ${error.message}`);
+                }
+            }
+            
+            // Hàm lấy tên hiển thị của thuật toán
+            function getAlgorithmDisplayName(algorithmValue) {
+                switch (algorithmValue) {
+                    case 'q_learning':
+                        return 'Q-Learning';
+                    case 'sarsa':
+                        return 'SARSA';
+                    case 'dqn':
+                        return 'Deep Q-Network (DQN)';
+                    default:
+                        return algorithmValue;
                 }
             }
             

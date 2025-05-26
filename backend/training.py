@@ -112,20 +112,31 @@ def create_agent(agent_type, state_size, action_size, args):
 
 def save_model_with_history(agent, model_dir, agent_type, maze_size, episodes, episode_history=None):
     """Lưu mô hình và lịch sử huấn luyện"""
-
-    filename = get_model_filename(agent_type, maze_size, episodes)
     
     # Tạo thư mục nếu chưa tồn tại
     Path(model_dir).mkdir(parents=True, exist_ok=True)
     
+    # Tạo tên file dựa trên agent_type, maze_size và episodes
+    height, width = maze_size
+    
     if agent_type == 'dqn':
-        filename = filename.replace('.pkl', '.pth')
+        # Lưu file .pth cho DQN
+        filename = f"dqn_{height}x{width}_{episodes}ep.pth"
+        save_path = os.path.join(model_dir, filename)
+        agent.save_model(save_path)
+        
+        # DQN agent đã tự động lưu .pkl trong hàm save_model()
+        # nên không cần lưu thêm
+    else:
+        # Lưu file .pkl cho Q-Learning và SARSA
+        filename = f"{agent_type}_{height}x{width}_{episodes}ep.pkl"
+        save_path = os.path.join(model_dir, filename)
+        agent.save_model(save_path)
     
-    save_path = os.path.join(model_dir, filename)
-    agent.save_model(save_path)
-    
+    # Lưu history nếu có
     if episode_history:
-        history_path = os.path.join(model_dir, f"{os.path.splitext(filename)[0]}_history.npz")
+        history_filename = f"{agent_type}_{height}x{width}_{episodes}ep_history.npz"
+        history_path = os.path.join(model_dir, history_filename)
         np.savez(history_path, **episode_history)
     
     return save_path

@@ -400,14 +400,6 @@ class QLearningAgent(BaseAgent):
                 success_rate = np.mean(self.episode_success[-100:]) if len(self.episode_success) >= 100 else np.mean(self.episode_success)
                 print(f"Episode {episode + 1}/{num_episodes}, Reward: {episode_reward:.2f}, Steps: {step}, "
                       f"Epsilon: {self.epsilon:.4f}, Success rate: {success_rate:.2%}")
-            
-            # Lưu mô hình định kỳ
-            if save_path and (episode + 1) % save_interval == 0:
-                self.save_model(f"{save_path}/q_learning_episode_{episode + 1}.pkl")
-        
-        # Lưu mô hình cuối cùng
-        if save_path:
-            self.save_model(f"{save_path}/q_learning_final.pkl")
         
         # Trả về kết quả huấn luyện
         return {
